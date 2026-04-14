@@ -1,0 +1,48 @@
+name: pos_jp_jeans
+description: "Punto de Venta y Gestor E-Commerce JP Jeans"
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.4
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+  qr_flutter: ^4.1.0
+  pdf: ^3.12.0
+  printing: ^5.14.3
+  http: ^1.6.0
+  intl: ^0.20.2
+  http_parser: ^4.1.2
+  image_picker: ^1.2.1
+  shared_preferences: ^2.5.5
+  webview_flutter: ^4.8.0 # 🚨 MOTOR PARA EL SIMULADOR WEB (SHOPPIFY KILLER)
+  barcode_scan2: ^4.7.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+
+flutter:
+  uses-material-design: true
+
+  # 🚨 AQUÍ ESTÁ TU LOGO
+  assets:
+    - assets/logo.png
+
+# ==============================================================
+# 🚨 CONFIGURACIÓN AUTOMÁTICA DE ÍCONOS PARA ANDROID, IOS Y PC
+# ==============================================================
+flutter_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/logo.png"
+  windows:
+    generate: true
+    image_path: "assets/logo.png"
