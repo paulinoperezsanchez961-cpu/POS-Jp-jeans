@@ -349,7 +349,7 @@ class _InventarioOficinaViewState extends State<InventarioOficinaView> {
                             List<dynamic> tallasRaw = [];
                             if (prod['tallas'] != null) {
                               if (prod['tallas'] is String) {
-                                tallasRaw = jsonDecode(prod['tallas']);
+                                try { tallasRaw = jsonDecode(prod['tallas']); } catch(e) { debugPrint('Aviso: $e'); }
                               } else {
                                 tallasRaw = prod['tallas'];
                               }
@@ -445,9 +445,9 @@ class _InventarioOficinaViewState extends State<InventarioOficinaView> {
                                           children: tallasRaw.map((e) {
                                             bool agotado = (e['stock'] ?? 0) == 0;
                                             return Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                               decoration: BoxDecoration(color: agotado ? Colors.red.shade50 : Colors.green.shade50, border: Border.all(color: agotado ? Colors.red.shade200 : Colors.green.shade200), borderRadius: BorderRadius.circular(4)),
-                                              child: Text('${e['talla']}: ${e['stock']} pz', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10, color: agotado ? Colors.red : Colors.green)),
+                                              child: Text('${e['talla']}: ${e['stock']} pz', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: agotado ? Colors.red : Colors.green)),
                                             );
                                           }).toList(),
                                         ),
