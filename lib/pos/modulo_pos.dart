@@ -14,7 +14,7 @@ import 'package:barcode_scan2/barcode_scan2.dart';
 import '../services/api_service.dart';
 
 // ============================================================================
-// 🧠 SANADOR DE IMÁGENES GLOBAL
+// 🧠 SANADORES GLOBALES (RAYOS X PARA EL ESCÁNER)
 // ============================================================================
 String sanearImagen(dynamic dbPath) {
   if (dbPath == null || dbPath.toString().trim().isEmpty) {
@@ -31,6 +31,13 @@ String sanearImagen(dynamic dbPath) {
   return 'https://api.jpjeansvip.com$cleanPath';
 }
 
+String sanitizarAlfanumerico(String text) {
+  if (text.isEmpty) return "";
+  String t = text.toUpperCase();
+  t = t.replaceAll('Á', 'A').replaceAll('É', 'E').replaceAll('Í', 'I').replaceAll('Ó', 'O').replaceAll('Ú', 'U');
+  return t.replaceAll(RegExp(r'[^A-Z0-9]'), ''); 
+}
+
 List<Map<String, dynamic>> parsearTallasBD(dynamic tallasRawData) {
   List<dynamic> tallasRaw = [];
   if (tallasRawData != null) {
@@ -40,17 +47,38 @@ List<Map<String, dynamic>> parsearTallasBD(dynamic tallasRawData) {
       tallasRaw = tallasRawData;
     }
   }
-  
   return tallasRaw.map((e) {
     if (e is Map) {
       return {
-        'talla': e['talla']?.toString() ?? e['nombre']?.toString() ?? 'ÚNICA',
+        'talla': (e['talla'] ?? e['nombre'] ?? 'ÚNICA').toString().trim().toUpperCase(),
         'cantidad': int.tryParse(e['cantidad']?.toString() ?? e['stock']?.toString() ?? '0') ?? 0,
       };
     } else {
-      return { 'talla': e.toString(), 'cantidad': 1 };
+      return { 'talla': e.toString().trim().toUpperCase(), 'cantidad': 1 };
     }
   }).toList();
+}
+
+Map<String, String> decodificarEscaneo(String raw) {
+  String limpio = raw.trim().toUpperCase();
+  String sku = limpio;
+  String talla = "UNICA";
+
+  if (limpio.contains('TALLA')) {
+    var parts = limpio.split('TALLA');
+    sku = sanitizarAlfanumerico(parts[0]);
+    if (parts.length > 1) talla = sanitizarAlfanumerico(parts[1]);
+  } else if (limpio.contains('SKU') && limpio.contains('TALLA')) {
+    final sMatch = RegExp(r'SKU[^\w\d]+([A-Z0-9\-\/]+)').firstMatch(limpio);
+    if (sMatch != null) sku = sanitizarAlfanumerico(sMatch.group(1)!);
+    final tMatch = RegExp(r'TALLA[^\w\d]+([A-Z0-9\-\/]+)').firstMatch(limpio);
+    if (tMatch != null) talla = sanitizarAlfanumerico(tMatch.group(1)!);
+  } else {
+    sku = sanitizarAlfanumerico(limpio);
+  }
+
+  if (talla.isEmpty) talla = "UNICA";
+  return {'sku': sku, 'talla': talla};
 }
 
 // ============================================================================
@@ -58,7 +86,6 @@ List<Map<String, dynamic>> parsearTallasBD(dynamic tallasRawData) {
 // ============================================================================
 class ModuloPOS extends StatefulWidget {
   const ModuloPOS({super.key});
-
   @override
   State<ModuloPOS> createState() => _ModuloPOSState();
 }
@@ -98,16 +125,11 @@ class _ModuloPOSState extends State<ModuloPOS> {
     await prefs.remove('caja_gastos');
     await prefs.remove('caja_carrito'); 
     await prefs.remove('caja_lista_gastos'); 
-    setState(() {
-      ventasDelDia = 0.0;
-      gastosDelDia = 0.0;
-    });
+    setState(() { ventasDelDia = 0.0; gastosDelDia = 0.0; });
   }
 
   void _cambiarPestana(int nuevaPestana) {
-    setState(() {
-      _index = nuevaPestana;
-    });
+    setState(() { _index = nuevaPestana; });
   }
 
   @override
@@ -167,9 +189,7 @@ class _ModuloPOSState extends State<ModuloPOS> {
             ],
           ),
           if (!isMobile) const VerticalDivider(thickness: 1, width: 1, color: Colors.black12),
-          Expanded(
-            child: vistas[_index]
-          ),
+          Expanded(child: vistas[_index]),
         ],
       ),
     );
@@ -177,12 +197,11 @@ class _ModuloPOSState extends State<ModuloPOS> {
 }
 
 // ============================================================================
-// 🚨 VISTA 4: MÓDULO DE APARTADOS
+// 🚨 VISTA 4: MÓDULO DE APARTADOS (ABONOS Y LIQUIDACIÓN INTELIGENTE)
 // ============================================================================
 class ApartadosView extends StatefulWidget {
   final Function(double) onVentaExitosa;
   const ApartadosView({super.key, required this.onVentaExitosa});
-
   @override
   State<ApartadosView> createState() => _ApartadosViewState();
 }
@@ -191,7 +210,7 @@ class _ApartadosViewState extends State<ApartadosView> {
   final TextEditingController _clienteController = TextEditingController();
   final TextEditingController _buscadorController = TextEditingController();
   final TextEditingController _engancheController = TextEditingController();
-  final TextEditingController _pagoLiquidarController = TextEditingController();
+  final FocusNode _buscadorFocus = FocusNode(); 
 
   final List<Map<String, dynamic>> _carritoApartado = [];
   List<dynamic> _catalogoReal = [];
@@ -207,12 +226,19 @@ class _ApartadosViewState extends State<ApartadosView> {
     _cargarApartados();
   }
 
+  @override
+  void dispose() {
+    _buscadorFocus.dispose();
+    super.dispose();
+  }
+
   Future<void> _cargarCatalogo() async {
     try {
       var res = await http.get(Uri.parse('${ApiService.baseUrl}/pos/catalogo'));
+      if (!mounted) return;
       if (res.statusCode == 200) {
         var data = jsonDecode(res.body);
-        if (data['exito'] == true && mounted) setState(() => _catalogoReal = data['productos']);
+        if (data['exito'] == true) setState(() => _catalogoReal = data['productos']);
       }
     } catch(e) { debugPrint('Aviso: $e'); }
   }
@@ -220,48 +246,93 @@ class _ApartadosViewState extends State<ApartadosView> {
   Future<void> _cargarApartados() async {
     try {
       var res = await http.get(Uri.parse('${ApiService.baseUrl}/pos/apartados'));
+      if (!mounted) return;
       if (res.statusCode == 200) {
         var data = jsonDecode(res.body);
-        if (data['exito'] == true && mounted) setState(() => _apartadosActivos = data['apartados']);
+        if (data['exito'] == true) setState(() => _apartadosActivos = data['apartados']);
       }
-    } catch(e) {
-      debugPrint("Aviso: $e");
-    }
+    } catch(e) { debugPrint("Aviso: $e"); }
+  }
+
+  void _mostrarSelectorDeTallasApartado(Map<String, dynamic> p, List<Map<String, dynamic>> tallasBD) {
+    showDialog(
+      context: context,
+      builder: (BuildContext contextDialog) {
+        return AlertDialog(
+          title: Text('Selecciona la talla de ${p['sku']}'),
+          content: Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: tallasBD.map((t) {
+              bool agotado = t['cantidad'] <= 0;
+              return ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: agotado ? Colors.grey : Colors.black, foregroundColor: Colors.white),
+                onPressed: agotado ? null : () {
+                  Navigator.pop(contextDialog);
+                  _ejecutarAgregarPrenda(p, sanitizarAlfanumerico(t['talla'].toString()), tallasBD);
+                },
+                child: Text('${t['talla']} (${t['cantidad']} pz)'),
+              );
+            }).toList(),
+          ),
+        );
+      }
+    );
   }
 
   void _agregarPrenda(String codigo) {
     if (codigo.isEmpty) return;
-    String skuBusqueda = codigo.trim();
-    String tallaEncontrada = "ÚNICA";
+    
+    final datosEscaneo = decodificarEscaneo(codigo);
+    String skuLimpio = datosEscaneo['sku']!;
+    String tallaLimpia = datosEscaneo['talla']!;
 
-    if (skuBusqueda.startsWith('{') && skuBusqueda.endsWith('}')) {
-      try {
-        final Map<String, dynamic> qrData = jsonDecode(skuBusqueda);
-        if (qrData.containsKey('sku')) skuBusqueda = qrData['sku'].toString();
-        if (qrData.containsKey('talla')) tallaEncontrada = qrData['talla'].toString();
-      } catch (e) { debugPrint('Aviso JSON QR: $e'); }
-    }
-
-    final producto = _catalogoReal.where((p) => p["sku"].toString().toLowerCase() == skuBusqueda.toLowerCase() || p["nombre"].toString().toLowerCase().contains(skuBusqueda.toLowerCase())).toList();
+    final producto = _catalogoReal.where((p) {
+      String dbSkuLimpio = sanitizarAlfanumerico(p["sku"].toString());
+      String dbNombreLimpio = sanitizarAlfanumerico(p["nombre"].toString());
+      return dbSkuLimpio == skuLimpio || dbNombreLimpio.contains(skuLimpio);
+    }).toList();
 
     if (producto.isNotEmpty) {
       var p = producto.first;
-      setState(() {
-        int index = _carritoApartado.indexWhere((item) => item['id'] == p['id'] && item['talla'] == tallaEncontrada);
-        if (index != -1) {
-          _carritoApartado[index]['cantidad'] += 1;
-        } else {
-          double precio = double.tryParse((p["en_rebaja"] == 1 ? p["precio_rebaja"] : p["precio_venta"]).toString()) ?? 0.0;
-          _carritoApartado.add({
-            "id": p["id"], "sku": p["sku"], "nombre": p["nombre"], "talla": tallaEncontrada, "precio": precio, "cantidad": 1, "foto_url": sanearImagen(p["url_foto_principal"])
-          });
-        }
-        _calcularTotal();
-        _buscadorController.clear();
-      });
+      List<Map<String, dynamic>> tallasBD = parsearTallasBD(p['tallas']);
+      
+      if (tallaLimpia == 'UNICA' && tallasBD.isNotEmpty && sanitizarAlfanumerico(tallasBD[0]['talla'].toString()) != 'UNICA') {
+          _mostrarSelectorDeTallasApartado(p, tallasBD);
+          return;
+      }
+      
+      _ejecutarAgregarPrenda(p, tallaLimpia, tallasBD);
     } else {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Prenda no encontrada'), backgroundColor: Colors.red));
+      _buscadorController.clear();
+      _buscadorFocus.requestFocus();
     }
+  }
+
+  void _ejecutarAgregarPrenda(Map<String, dynamic> p, String tallaEncontradaLimpia, List<Map<String, dynamic>> tallasBD) {
+    String tallaRealVisual = "ÚNICA";
+    for (var t in tallasBD) {
+      if (sanitizarAlfanumerico(t['talla'].toString()) == tallaEncontradaLimpia) {
+        tallaRealVisual = t['talla'].toString();
+        break;
+      }
+    }
+
+    setState(() {
+      int index = _carritoApartado.indexWhere((item) => item['id'] == p['id'] && item['talla'] == tallaRealVisual);
+      if (index != -1) {
+        _carritoApartado[index]['cantidad'] += 1;
+      } else {
+        double precio = double.tryParse((p["en_rebaja"] == 1 ? p["precio_rebaja"] : p["precio_venta"]).toString()) ?? 0.0;
+        _carritoApartado.add({
+          "id": p["id"], "sku": p["sku"], "nombre": p["nombre"], "talla": tallaRealVisual, "precio": precio, "cantidad": 1, "foto_url": sanearImagen(p["url_foto_principal"])
+        });
+      }
+      _calcularTotal();
+      _buscadorController.clear();
+      _buscadorFocus.requestFocus(); 
+    });
   }
 
   void _calcularTotal() {
@@ -280,9 +351,6 @@ class _ApartadosViewState extends State<ApartadosView> {
     }
 
     setState(() => _procesando = true);
-    
-    // 🚨 CAPTURAMOS EL MESSENGER ANTES DEL ASYNC GAP
-    final sm = ScaffoldMessenger.of(context);
 
     try {
       var res = await http.post(
@@ -290,62 +358,32 @@ class _ApartadosViewState extends State<ApartadosView> {
         headers: {"Content-Type": "application/json"},
         body: jsonEncode({"cliente": _clienteController.text, "carrito": _carritoApartado, "enganche": enganche, "total": _totalApartado})
       );
+      if (!mounted) return;
       
       var data = jsonDecode(res.body);
       if (data['exito'] == true || res.statusCode == 404) {
-        final doc = pw.Document();
-        final now = DateTime.now();
-        final fecha = '${now.day}/${now.month}/${now.year}';
         
-        doc.addPage(
-          pw.Page(
-            pageFormat: const PdfPageFormat(80 * PdfPageFormat.mm, double.infinity, marginAll: 5 * PdfPageFormat.mm),
-            build: (pw.Context context) {
-              return pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.center,
-                mainAxisSize: pw.MainAxisSize.min,
-                children: [
-                  pw.Text('JP JEANS', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
-                  pw.Text('TICKET DE APARTADO', style: const pw.TextStyle(fontSize: 10)),
-                  pw.SizedBox(height: 5),
-                  pw.Text('Fecha: $fecha', style: const pw.TextStyle(fontSize: 8)),
-                  pw.Text('Cliente: ${_clienteController.text.toUpperCase()}', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
-                  pw.Divider(borderStyle: pw.BorderStyle.dashed),
-                  ..._carritoApartado.map((item) => pw.Row(
-                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                    children: [
-                      pw.Expanded(child: pw.Text('${item['cantidad']}x ${item['nombre']} [${item['talla']}]', style: const pw.TextStyle(fontSize: 8))),
-                      pw.Text('\$${(item['precio'] * item['cantidad']).toStringAsFixed(2)}', style: const pw.TextStyle(fontSize: 8)),
-                    ]
-                  )),
-                  pw.Divider(borderStyle: pw.BorderStyle.dashed),
-                  pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text('TOTAL', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)), pw.Text('\$${_totalApartado.toStringAsFixed(2)}', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold))]),
-                  pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text('ENGANCHE', style: const pw.TextStyle(fontSize: 10)), pw.Text('\$${enganche.toStringAsFixed(2)}', style: const pw.TextStyle(fontSize: 10))]),
-                  pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text('RESTA', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)), pw.Text('\$${(_totalApartado - enganche).toStringAsFixed(2)}', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold))]),
-                  pw.Divider(borderStyle: pw.BorderStyle.dashed),
-                  pw.SizedBox(height: 5),
-                  pw.Text('TIENES 20 DÍAS PARA LIQUIDAR.', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
-                  pw.Text('NO HAY DEVOLUCIONES DE ENGANCHE.', style: const pw.TextStyle(fontSize: 8)),
-                  pw.SizedBox(height: 10),
-                ]
-              );
-            }
-          )
+        await _imprimirTicketApartado(
+          "TICKET DE APARTADO", 
+          _clienteController.text, 
+          _carritoApartado, 
+          _totalApartado, 
+          enganche, 
+          _totalApartado - enganche
         );
-        await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => doc.save(), name: 'Apartado_${_clienteController.text}');
-        
+        if (!mounted) return;
+
         widget.onVentaExitosa(enganche);
 
-        if (mounted) {
-          setState(() {
-            _carritoApartado.clear();
-            _clienteController.clear();
-            _engancheController.clear();
-            _totalApartado = 0.0;
-          });
-        }
+        setState(() {
+          _carritoApartado.clear();
+          _clienteController.clear();
+          _engancheController.clear();
+          _totalApartado = 0.0;
+        });
+        
         _cargarApartados();
-        sm.showSnackBar(const SnackBar(content: Text('Apartado creado con éxito'), backgroundColor: Colors.green));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Apartado creado con éxito'), backgroundColor: Colors.green));
       }
     } catch(e) { 
       debugPrint('Aviso al crear apartado: $e'); 
@@ -354,53 +392,80 @@ class _ApartadosViewState extends State<ApartadosView> {
     }
   }
 
-  void _abrirDialogoLiquidar(Map<String, dynamic> apartado) {
-    double resta = double.tryParse(apartado['resta'].toString()) ?? 0.0;
-    _pagoLiquidarController.clear();
-
-    // 🚨 CAPTURAMOS EL MESSENGER
-    final sm = ScaffoldMessenger.of(context);
+  // 🚨 BOTÓN INTELIGENTE: ABONO Y LIQUIDACIÓN
+  void _abrirDialogoLiquidarOAbonar(Map<String, dynamic> apartado) {
+    double restaAnterior = double.tryParse(apartado['resta'].toString()) ?? 0.0;
+    double totalOriginal = double.tryParse(apartado['total'].toString()) ?? 0.0;
+    TextEditingController pagoController = TextEditingController();
 
     showDialog(
       context: context,
       builder: (contextDialog) => StatefulBuilder(
         builder: (contextBuilder, setStateDialog) {
-          double pago = double.tryParse(_pagoLiquidarController.text) ?? 0.0;
-          double cambio = (pago >= resta) ? pago - resta : 0.0;
+          double pago = double.tryParse(pagoController.text) ?? 0.0;
+          bool esLiquidacion = pago >= restaAnterior;
+          double cambio = esLiquidacion ? (pago - restaAnterior) : 0.0;
+          double nuevaResta = esLiquidacion ? 0.0 : (restaAnterior - pago);
 
           return AlertDialog(
-            title: Text('Liquidar Apartado - ${apartado['cliente']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            title: Text('Cobrar - ${apartado['cliente']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Resta por pagar: \$${resta.toStringAsFixed(2)}', style: const TextStyle(fontSize: 18, color: Colors.red, fontWeight: FontWeight.bold)),
+                Text('Resta actual: \$${restaAnterior.toStringAsFixed(2)}', style: const TextStyle(fontSize: 18, color: Colors.red, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 20),
                 TextField(
-                  controller: _pagoLiquidarController,
+                  controller: pagoController,
                   keyboardType: TextInputType.number,
                   onChanged: (val) => setStateDialog(() {}),
-                  decoration: const InputDecoration(labelText: 'Pago del cliente (\$)', border: OutlineInputBorder(), prefixIcon: Icon(Icons.attach_money)),
+                  decoration: const InputDecoration(labelText: 'Dinero que entrega el cliente (\$)', border: OutlineInputBorder(), prefixIcon: Icon(Icons.attach_money)),
                 ),
                 const SizedBox(height: 10),
-                Text('CAMBIO: \$${cambio.toStringAsFixed(2)}', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: cambio > 0 ? Colors.green : Colors.grey)),
+                if (esLiquidacion) ...[
+                  Text('LIQUIDA CUENTA', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green.shade700)),
+                  Text('CAMBIO: \$${cambio.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: Colors.green)),
+                ] else if (pago > 0) ...[
+                  Text('ABONO PARCIAL', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.orange.shade700)),
+                  Text('Nueva Resta: \$${nuevaResta.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.orange)),
+                ],
               ],
             ),
             actions: [
               TextButton(onPressed: () => Navigator.pop(contextDialog), child: const Text('Cancelar', style: TextStyle(color: Colors.grey))),
               ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white),
-                onPressed: pago >= resta ? () async {
+                style: ElevatedButton.styleFrom(backgroundColor: esLiquidacion ? Colors.black : Colors.orange, foregroundColor: Colors.white),
+                onPressed: pago > 0 ? () async {
                   Navigator.pop(contextDialog);
                   if (mounted) setState(() => _procesando = true);
                   try {
-                    await http.post(Uri.parse('${ApiService.baseUrl}/pos/apartados/liquidar/${apartado['id']}'), body: jsonEncode({"pago": resta}), headers: {"Content-Type": "application/json"});
-                    widget.onVentaExitosa(resta);
+                    String url = esLiquidacion 
+                        ? '${ApiService.baseUrl}/pos/apartados/liquidar/${apartado['id']}' 
+                        : '${ApiService.baseUrl}/pos/apartados/abonar/${apartado['id']}'; 
+                        
+                    double dineroParaCuenta = esLiquidacion ? restaAnterior : pago;
+
+                    await http.post(Uri.parse(url), body: jsonEncode({"pago": dineroParaCuenta}), headers: {"Content-Type": "application/json"});
+                    if (!mounted) return;
+                    
+                    widget.onVentaExitosa(dineroParaCuenta);
                     _cargarApartados();
-                    sm.showSnackBar(const SnackBar(content: Text('Apartado Liquidado Exitosamente'), backgroundColor: Colors.green));
-                  } catch(e) { debugPrint('Aviso liquidar: $e'); } finally { if (mounted) setState(() => _procesando = false); }
+                    
+                    List<dynamic> itemsRecuperados = jsonDecode(apartado['items'] ?? '[]');
+                    List<Map<String, dynamic>> carritoRecuperado = itemsRecuperados.map((e) => Map<String,dynamic>.from(e)).toList();
+                    
+                    if (esLiquidacion) {
+                      await _imprimirTicketApartado("LIQUIDACIÓN DE APARTADO", apartado['cliente'], carritoRecuperado, totalOriginal, dineroParaCuenta, 0.0, cambio: cambio, pagoCliente: pago);
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cuenta liquidada. Ticket impreso.'), backgroundColor: Colors.green));
+                    } else {
+                      await _imprimirTicketApartado("ABONO A CUENTA", apartado['cliente'], carritoRecuperado, totalOriginal, pago, nuevaResta);
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Abono registrado. Ticket impreso.'), backgroundColor: Colors.orange));
+                    }
+                  } catch(e) { debugPrint('Aviso liquidar/abonar: $e'); } finally { if (mounted) setState(() => _procesando = false); }
                 } : null,
-                child: const Text('COBRAR Y LIQUIDAR'),
+                child: Text(esLiquidacion ? 'COBRAR Y LIQUIDAR' : 'REGISTRAR ABONO'),
               )
             ],
           );
@@ -409,9 +474,60 @@ class _ApartadosViewState extends State<ApartadosView> {
     );
   }
 
-  void _devolverAStock(String idApartado) async {
-    final sm = ScaffoldMessenger.of(context);
+  Future<void> _imprimirTicketApartado(String titulo, String cliente, List<Map<String, dynamic>> carrito, double total, double pagoActual, double resta, {double cambio = 0.0, double pagoCliente = 0.0}) async {
+    final doc = pw.Document();
+    pw.MemoryImage? imageLogo;
+    try { imageLogo = pw.MemoryImage((await rootBundle.load('assets/logo.png')).buffer.asUint8List()); } catch (e) { debugPrint('Logo: $e'); }
     
+    final now = DateTime.now();
+    final fecha = '${now.day}/${now.month}/${now.year} ${now.hour}:${now.minute}';
+    
+    doc.addPage(
+      pw.Page(
+        pageFormat: const PdfPageFormat(80 * PdfPageFormat.mm, double.infinity, marginAll: 5 * PdfPageFormat.mm),
+        build: (pw.Context context) {
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.center,
+            mainAxisSize: pw.MainAxisSize.min,
+            children: [
+              if (imageLogo != null) pw.Image(imageLogo, width: 40, height: 40),
+              pw.SizedBox(height: 5),
+              pw.Text('JP JEANS', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
+              pw.Text(titulo, style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+              pw.SizedBox(height: 5),
+              pw.Text('Fecha: $fecha', style: const pw.TextStyle(fontSize: 8)),
+              pw.Text('Cliente: ${cliente.toUpperCase()}', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+              pw.Divider(borderStyle: pw.BorderStyle.dashed),
+              ...carrito.map((item) => pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Expanded(child: pw.Text('${item['cantidad']}x ${item['nombre']} [${item['talla']}]', style: const pw.TextStyle(fontSize: 8))),
+                  pw.Text('\$${(item['precio'] * item['cantidad']).toStringAsFixed(2)}', style: const pw.TextStyle(fontSize: 8)),
+                ]
+              )),
+              pw.Divider(borderStyle: pw.BorderStyle.dashed),
+              pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text('TOTAL ORIGINAL', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)), pw.Text('\$${total.toStringAsFixed(2)}', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold))]),
+              pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text('SU PAGO HOY', style: const pw.TextStyle(fontSize: 10)), pw.Text('\$${pagoActual.toStringAsFixed(2)}', style: const pw.TextStyle(fontSize: 10))]),
+              pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text('RESTA POR PAGAR', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)), pw.Text('\$${resta.toStringAsFixed(2)}', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold))]),
+              if (cambio > 0) ...[
+                pw.Divider(borderStyle: pw.BorderStyle.dashed),
+                pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text('EFECTIVO RECIBIDO', style: const pw.TextStyle(fontSize: 8)), pw.Text('\$${pagoCliente.toStringAsFixed(2)}', style: const pw.TextStyle(fontSize: 8))]),
+                pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text('CAMBIO', style: const pw.TextStyle(fontSize: 8)), pw.Text('\$${cambio.toStringAsFixed(2)}', style: const pw.TextStyle(fontSize: 8))]),
+              ],
+              pw.Divider(borderStyle: pw.BorderStyle.dashed),
+              pw.SizedBox(height: 5),
+              if (resta > 0) pw.Text('TIENES 20 DÍAS PARA LIQUIDAR.', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+              pw.Text('NO HAY DEVOLUCIONES.', style: const pw.TextStyle(fontSize: 8)),
+              pw.SizedBox(height: 10),
+            ]
+          );
+        }
+      )
+    );
+    await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => doc.save(), name: 'Recibo_Apartado');
+  }
+
+  void _devolverAStock(String idApartado) async {
     bool? conf = await showDialog(
       context: context,
       builder: (contextDialog) => AlertDialog(
@@ -428,8 +544,9 @@ class _ApartadosViewState extends State<ApartadosView> {
       if (mounted) setState(() => _procesando = true);
       try {
         await http.post(Uri.parse('${ApiService.baseUrl}/pos/apartados/cancelar/$idApartado'));
+        if (!mounted) return;
         _cargarApartados();
-        sm.showSnackBar(const SnackBar(content: Text('Prendas devueltas al stock'), backgroundColor: Colors.green));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Prendas devueltas al stock'), backgroundColor: Colors.green));
       } catch(e) { debugPrint('Aviso devolver stock: $e'); } finally { if (mounted) setState(() => _procesando = false); }
     }
   }
@@ -443,7 +560,7 @@ class _ApartadosViewState extends State<ApartadosView> {
       children: [
         TextField(controller: _clienteController, decoration: const InputDecoration(labelText: 'Nombre del Cliente', border: OutlineInputBorder(), prefixIcon: Icon(Icons.person))),
         const SizedBox(height: 16),
-        TextField(controller: _buscadorController, decoration: InputDecoration(labelText: 'Escanear Código / QR', border: const OutlineInputBorder(), prefixIcon: const Icon(Icons.qr_code_scanner), suffixIcon: IconButton(icon: const Icon(Icons.search), onPressed: () => _agregarPrenda(_buscadorController.text))), onSubmitted: _agregarPrenda),
+        TextField(controller: _buscadorController, focusNode: _buscadorFocus, decoration: InputDecoration(labelText: 'Escanear Código / QR', border: const OutlineInputBorder(), prefixIcon: const Icon(Icons.qr_code_scanner), suffixIcon: IconButton(icon: const Icon(Icons.search), onPressed: () => _agregarPrenda(_buscadorController.text))), onSubmitted: _agregarPrenda),
         const SizedBox(height: 16),
         Container(
           constraints: const BoxConstraints(maxHeight: 200),
@@ -495,7 +612,7 @@ class _ApartadosViewState extends State<ApartadosView> {
                     ),
                     Column(
                       children: [
-                        ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white), onPressed: () => _abrirDialogoLiquidar(apt), child: const Text('LIQUIDAR')),
+                        ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white), onPressed: () => _abrirDialogoLiquidarOAbonar(apt), child: const Text('COBRAR')),
                         const SizedBox(height: 8),
                         OutlinedButton(style: OutlinedButton.styleFrom(foregroundColor: Colors.red, side: const BorderSide(color: Colors.red)), onPressed: () => _devolverAStock(apt['id'].toString()), child: const Text('DEVOLVER')),
                       ],
@@ -548,6 +665,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
   final TextEditingController _buscadorController = TextEditingController();
   final TextEditingController _pagoController = TextEditingController();
   final TextEditingController _cuponController = TextEditingController();
+  final FocusNode _buscadorFocus = FocusNode(); 
   
   final List<Map<String, dynamic>> carrito = [];
   List<dynamic> _catalogoReal = [];
@@ -557,12 +675,11 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
   double _total = 0.0;
   double _cambio = 0.0;
   String _vendedorAsociado = "";
+  double _descuentoPorPieza = 0.0; // 🚨 DINERO FIJO
   
   bool _procesandoCobro = false; 
   bool _cobroEfectivoModo = false; 
   Timer? _mpPollingTimer;
-
-  final double _valorPromocionActual = 50.00; 
 
   @override
   void initState() {
@@ -574,17 +691,17 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
   @override
   void dispose() {
     _mpPollingTimer?.cancel();
+    _buscadorFocus.dispose();
     super.dispose();
   }
 
   Future<void> _cargarCatalogoDesdeCerebro() async {
     try {
       var res = await http.get(Uri.parse('${ApiService.baseUrl}/pos/catalogo'));
+      if (!mounted) return;
       if (res.statusCode == 200) {
         var data = jsonDecode(res.body);
-        if (data['exito'] == true && mounted) {
-          setState(() => _catalogoReal = data['productos']);
-        }
+        if (data['exito'] == true) setState(() => _catalogoReal = data['productos']);
       }
     } catch(e) { debugPrint("Error catalogo: $e"); }
   }
@@ -622,102 +739,146 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     }
   }
 
+  void _mostrarSelectorDeTallas(Map<String, dynamic> p, List<Map<String, dynamic>> tallasBD) {
+    showDialog(
+      context: context,
+      builder: (BuildContext contextDialog) {
+        return AlertDialog(
+          title: Text('Selecciona la talla de ${p['sku']}'),
+          content: Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: tallasBD.map((t) {
+              bool agotado = t['cantidad'] <= 0;
+              return ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: agotado ? Colors.grey : Colors.black, foregroundColor: Colors.white),
+                onPressed: agotado ? null : () {
+                  Navigator.pop(contextDialog);
+                  _ejecutarAgregarAlCarrito(p, sanitizarAlfanumerico(t['talla'].toString()), tallasBD);
+                },
+                child: Text('${t['talla']} (${t['cantidad']} pz)'),
+              );
+            }).toList(),
+          ),
+        );
+      }
+    );
+  }
+
   void _agregarAlCarrito(String codigoOBusqueda) {
     if (codigoOBusqueda.isEmpty) return;
     
-    String skuBusqueda = codigoOBusqueda.trim();
-    String tallaEncontrada = "ÚNICA";
+    final datosEscaneo = decodificarEscaneo(codigoOBusqueda);
+    String skuLimpio = datosEscaneo['sku']!;
+    String tallaLimpia = datosEscaneo['talla']!;
 
-    if (skuBusqueda.startsWith('{') && skuBusqueda.endsWith('}')) {
-      try {
-        final Map<String, dynamic> qrData = jsonDecode(skuBusqueda);
-        if (qrData.containsKey('sku')) skuBusqueda = qrData['sku'].toString();
-        if (qrData.containsKey('talla')) tallaEncontrada = qrData['talla'].toString();
-      } catch (e) {
-        debugPrint("No es un JSON válido, buscando normal.");
-      }
-    }
-
-    final producto = _catalogoReal.where((p) => 
-      p["sku"].toString().toLowerCase() == skuBusqueda.toLowerCase() || 
-      p["nombre"].toString().toLowerCase().contains(skuBusqueda.toLowerCase())
-    ).toList();
+    final producto = _catalogoReal.where((p) {
+      String dbSkuLimpio = sanitizarAlfanumerico(p["sku"].toString());
+      String dbNombreLimpio = sanitizarAlfanumerico(p["nombre"].toString());
+      return dbSkuLimpio == skuLimpio || dbNombreLimpio.contains(skuLimpio);
+    }).toList();
 
     if (producto.isNotEmpty) {
       var p = producto.first;
-      int indexEnCarrito = carrito.indexWhere((item) => item['id'] == p['id'] && item['talla'] == tallaEncontrada);
-      int cantidadActual = indexEnCarrito != -1 ? carrito[indexEnCarrito]['cantidad'] : 0;
-
       List<Map<String, dynamic>> tallasBD = parsearTallasBD(p['tallas']);
-      int stockDisponible = 0;
-      
-      for (var t in tallasBD) {
-        if (t['talla'] == tallaEncontrada) {
-          stockDisponible = t['cantidad'];
-          break;
-        }
+      if (tallaLimpia == 'UNICA' && tallasBD.isNotEmpty && sanitizarAlfanumerico(tallasBD[0]['talla'].toString()) != 'UNICA') {
+          _mostrarSelectorDeTallas(p, tallasBD);
+          return;
       }
-
-      if (stockDisponible == 0 && tallasBD.isEmpty) {
-         stockDisponible = int.tryParse(p["stock_bodega"]?.toString() ?? '0') ?? 0;
-      }
-
-      if (stockDisponible <= cantidadActual) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Sin stock suficiente de la talla $tallaEncontrada'), backgroundColor: Colors.orange));
-        return;
-      }
-
-      setState(() {
-        if (indexEnCarrito != -1) {
-          carrito[indexEnCarrito]['cantidad'] += 1;
-        } else {
-          double precioVenta = double.tryParse(p["precio_venta"].toString()) ?? 0.0;
-          bool enRebaja = p["en_rebaja"] == 1 || p["en_rebaja"] == true;
-          double precioRebaja = double.tryParse(p["precio_rebaja"]?.toString() ?? '0') ?? 0.0;
-
-          carrito.add({
-            "id": p["id"],
-            "sku": p["sku"],
-            "nombre": p["nombre"],
-            "talla": tallaEncontrada, 
-            "precio_venta": precioVenta,
-            "en_rebaja": enRebaja,
-            "precio_rebaja": precioRebaja,
-            "precio": enRebaja ? precioRebaja : precioVenta,
-            "cantidad": 1,
-            "foto_url": sanearImagen(p["url_foto_principal"]) 
-          });
-        }
-        _recalcularTotal();
-        _buscadorController.clear();
-        _guardarCarritoMemoria();
-      });
+      _ejecutarAgregarAlCarrito(p, tallaLimpia, tallasBD);
     } else {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Prenda no encontrada'), backgroundColor: Colors.red));
+      _buscadorController.clear();
+      _buscadorFocus.requestFocus();
     }
+  }
+
+  void _ejecutarAgregarAlCarrito(Map<String, dynamic> p, String tallaEncontradaLimpia, List<Map<String, dynamic>> tallasBD) {
+    String tallaRealVisual = "ÚNICA";
+    int stockDisponible = 0;
+
+    for (var t in tallasBD) {
+      if (sanitizarAlfanumerico(t['talla'].toString()) == tallaEncontradaLimpia) {
+        stockDisponible = t['cantidad'];
+        tallaRealVisual = t['talla'].toString();
+        break;
+      }
+    }
+
+    if (stockDisponible == 0 && tallasBD.isEmpty) {
+       stockDisponible = int.tryParse(p["stock_bodega"]?.toString() ?? '0') ?? 0;
+    }
+
+    int indexEnCarrito = carrito.indexWhere((item) => item['id'] == p['id'] && item['talla'] == tallaRealVisual);
+    int cantidadActual = indexEnCarrito != -1 ? carrito[indexEnCarrito]['cantidad'] : 0;
+
+    if (stockDisponible <= cantidadActual) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Sin stock suficiente de la talla $tallaRealVisual'), backgroundColor: Colors.orange));
+      _buscadorController.clear();
+      _buscadorFocus.requestFocus();
+      return;
+    }
+
+    setState(() {
+      if (indexEnCarrito != -1) {
+        carrito[indexEnCarrito]['cantidad'] += 1;
+      } else {
+        double precioVenta = double.tryParse(p["precio_venta"].toString()) ?? 0.0;
+        bool enRebaja = p["en_rebaja"] == 1 || p["en_rebaja"] == true;
+        double precioRebaja = double.tryParse(p["precio_rebaja"]?.toString() ?? '0') ?? 0.0;
+
+        carrito.add({
+          "id": p["id"], "sku": p["sku"], "nombre": p["nombre"], "talla": tallaRealVisual, 
+          "precio_venta": precioVenta, "en_rebaja": enRebaja, "precio_rebaja": precioRebaja,
+          "precio": enRebaja ? precioRebaja : precioVenta, "cantidad": 1, "foto_url": sanearImagen(p["url_foto_principal"]) 
+        });
+      }
+      _recalcularTotal();
+      _buscadorController.clear();
+      _guardarCarritoMemoria();
+      _buscadorFocus.requestFocus(); 
+    });
   }
 
   void _quitarDelCarrito(int index) {
     setState(() {
       carrito.removeAt(index);
-      if (carrito.isEmpty) { _descuentoAplicado = 0.0; _vendedorAsociado = ""; _cuponController.clear(); _cobroEfectivoModo = false; }
+      if (carrito.isEmpty) { _descuentoAplicado = 0.0; _vendedorAsociado = ""; _cuponController.clear(); _cobroEfectivoModo = false; _descuentoPorPieza = 0.0; }
       _recalcularTotal();
       _guardarCarritoMemoria();
+      _buscadorFocus.requestFocus();
     });
   }
 
-  void _aplicarCupon() {
+  Future<void> _aplicarCupon() async {
     if (carrito.isEmpty) return;
     String codigoIngresado = _cuponController.text.trim().toUpperCase();
-    if (codigoIngresado == "MARIA_JP" || codigoIngresado == "CARLOS_JP") {
-      setState(() { _vendedorAsociado = codigoIngresado; _descuentoAplicado = _valorPromocionActual; _recalcularTotal(); });
-    } else {
-      setState(() { _vendedorAsociado = ""; _descuentoAplicado = 0.0; _recalcularTotal(); });
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Código inválido'), backgroundColor: Colors.red));
+    
+    try {
+      var res = await http.get(Uri.parse('${ApiService.baseUrl}/cupones/validar/$codigoIngresado'));
+      if (!mounted) return;
+      var data = jsonDecode(res.body);
+      
+      if (data['valido'] == true) {
+        setState(() { 
+          _vendedorAsociado = codigoIngresado; 
+          _descuentoPorPieza = double.tryParse(data['descuento'].toString()) ?? 0.0; 
+          _recalcularTotal(); 
+        });
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Código aplicado con éxito'), backgroundColor: Colors.green));
+      } else {
+        setState(() { _vendedorAsociado = ""; _descuentoPorPieza = 0.0; _recalcularTotal(); });
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Código inválido o inactivo'), backgroundColor: Colors.red));
+      }
+    } catch(e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error al conectar con servidor'), backgroundColor: Colors.orange));
     }
   }
 
   void _recalcularTotal() {
+    int piezasTotales = carrito.fold(0, (sum, item) => sum + (item['cantidad'] as int));
+    _descuentoAplicado = _descuentoPorPieza * piezasTotales;
     _subtotal = carrito.fold(0, (sum, item) => sum + (item["precio"] * item["cantidad"]));
     _total = _subtotal - _descuentoAplicado;
     if (_total < 0) _total = 0; 
@@ -731,12 +892,9 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
 
   Future<void> _iniciarCobroTerminalMP() async {
     if (carrito.isEmpty || _procesandoCobro) return;
-    
     setState(() => _procesandoCobro = true);
 
-    // 🚨 CAPTURAMOS LOS CONTROLES ANTES DEL ASYNC GAP
     final nav = Navigator.of(context, rootNavigator: true);
-    final sm = ScaffoldMessenger.of(context);
 
     showDialog(
       context: context,
@@ -763,6 +921,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         headers: {"Content-Type": "application/json"},
         body: jsonEncode({"total": _total, "descripcion": "Venta Tienda Física"})
       );
+      if (!mounted) return;
       
       var data = jsonDecode(res.body);
       
@@ -779,32 +938,36 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
               
               if (estado == 'FINISHED') {
                 timer.cancel();
+                if (!mounted) return;
                 nav.pop(); 
                 _ejecutarCobroEImprimirTicket(metodo: "Tarjeta MP");
               } else if (estado == 'CANCELED' || estado == 'ERROR') {
                 timer.cancel();
+                if (!mounted) return;
                 nav.pop();
-                sm.showSnackBar(SnackBar(content: Text('Pago cancelado o rechazado ($estado)'), backgroundColor: Colors.red));
-                if (mounted) setState(() => _procesandoCobro = false);
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Pago cancelado o rechazado ($estado)'), backgroundColor: Colors.red));
+                setState(() => _procesandoCobro = false);
               }
             }
           } catch(e) {
              timer.cancel();
+             if (!mounted) return;
              nav.pop();
-             if (mounted) setState(() => _procesandoCobro = false);
-             sm.showSnackBar(const SnackBar(content: Text('Error al consultar estado de MP'), backgroundColor: Colors.red));
+             setState(() => _procesandoCobro = false);
+             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error al consultar estado de MP'), backgroundColor: Colors.red));
           }
         });
 
       } else {
         nav.pop();
-        if (mounted) setState(() => _procesandoCobro = false);
-        sm.showSnackBar(SnackBar(content: Text(data['error'] ?? 'No se pudo conectar a la terminal'), backgroundColor: Colors.red));
+        setState(() => _procesandoCobro = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(data['error'] ?? 'No se pudo conectar a la terminal'), backgroundColor: Colors.red));
       }
     } catch (e) {
+      if (!mounted) return;
       nav.pop();
-      if (mounted) setState(() => _procesandoCobro = false);
-      sm.showSnackBar(SnackBar(content: Text('Error de red: $e'), backgroundColor: Colors.red));
+      setState(() => _procesandoCobro = false);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error de red: $e'), backgroundColor: Colors.red));
     }
   }
 
@@ -817,15 +980,23 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     
     setState(() => _procesandoCobro = true);
 
+    List<Map<String, dynamic>> carritoAEnviar = carrito.map((item) {
+      var mod = Map<String, dynamic>.from(item);
+      mod['precio_venta'] = (mod['precio_venta'] - _descuentoPorPieza).clamp(0.0, double.infinity);
+      if (mod['en_rebaja']) mod['precio_rebaja'] = (mod['precio_rebaja'] - _descuentoPorPieza).clamp(0.0, double.infinity);
+      return mod;
+    }).toList();
+
     try {
       var res = await http.post(
         Uri.parse('${ApiService.baseUrl}/pos/vender'),
         headers: {"Content-Type": "application/json"},
-        body: jsonEncode({"carrito": carrito, "metodo_pago": metodo})
+        body: jsonEncode({"carrito": carritoAEnviar, "metodo_pago": metodo})
       );
+      if (!mounted) return;
       
       var data = jsonDecode(res.body);
-      
+
       if (data['exito'] == true) {
         final List<Map<String, dynamic>> carritoImpresion = List.from(carrito);
         final double totalImpresion = _total;
@@ -835,7 +1006,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
 
         widget.onVentaExitosa(_total);
 
-        setState(() { carrito.clear(); _pagoController.clear(); _cuponController.clear(); _vendedorAsociado = ""; _descuentoAplicado = 0.0; _cobroEfectivoModo = false; _recalcularTotal(); });
+        setState(() { carrito.clear(); _pagoController.clear(); _cuponController.clear(); _vendedorAsociado = ""; _descuentoAplicado = 0.0; _descuentoPorPieza = 0.0; _cobroEfectivoModo = false; _recalcularTotal(); });
         _guardarCarritoMemoria(); 
         _cargarCatalogoDesdeCerebro(); 
 
@@ -905,7 +1076,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         );
         await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => doc.save(), name: 'Ticket_JPJeans');
       } else {
-        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('❌ Error BD: ${data['error']}'), backgroundColor: Colors.red));
       }
     } catch (e) {
@@ -913,11 +1083,13 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('❌ Error de red: $e'), backgroundColor: Colors.red));
     } finally {
       if (mounted) setState(() => _procesandoCobro = false);
+      _buscadorFocus.requestFocus(); 
     }
   }
 
   Future<void> _imprimirCorteCaja() async {
     await ApiService.guardarCorteCaja("Cajero Mostrador", widget.ventasTotales, widget.gastosTotales);
+    if (!mounted) return;
 
     final doc = pw.Document();
     pw.MemoryImage? imageLogo;
@@ -955,9 +1127,9 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
       )
     );
     await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => doc.save(), name: 'Corte_Caja_JPJeans');
+    if (!mounted) return;
     
     widget.onCerrarCaja();
-    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ Corte exitoso. Memoria de caja limpiada.'), backgroundColor: Colors.green));
   }
 
@@ -986,6 +1158,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         const SizedBox(height: 20),
         TextField(
           controller: _buscadorController, 
+          focusNode: _buscadorFocus, 
           autofocus: true, 
           decoration: InputDecoration(
             labelText: 'Escanear Código de Barras / QR', 
@@ -1101,7 +1274,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
           
           const SizedBox(height: 20),
 
-          // 🚨 BOTONES DE PAGO MAESTROS
           if (carrito.isNotEmpty) ...[
             if (!_cobroEfectivoModo) ...[
               Row(
@@ -1173,7 +1345,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
 }
 
 // ============================================================================
-// 🚨 VISTA 2: CAMBIOS Y DEVOLUCIONES
+// 🚨 VISTA 2: CAMBIOS Y DEVOLUCIONES CON TICKET
 // ============================================================================
 class CambiosView extends StatefulWidget {
   const CambiosView({super.key});
@@ -1185,6 +1357,8 @@ class _CambiosViewState extends State<CambiosView> {
   final TextEditingController _entraController = TextEditingController();
   final TextEditingController _saleController = TextEditingController();
   final TextEditingController _motivoController = TextEditingController();
+  final FocusNode _entraFocus = FocusNode();
+  final FocusNode _saleFocus = FocusNode();
 
   final List<Map<String, dynamic>> _articulosEntran = [];
   final List<Map<String, dynamic>> _articulosSalen = [];
@@ -1195,46 +1369,164 @@ class _CambiosViewState extends State<CambiosView> {
     super.initState();
     _cargarCatalogoDesdeCerebro();
   }
+  
+  @override
+  void dispose() {
+    _entraFocus.dispose();
+    _saleFocus.dispose();
+    super.dispose();
+  }
 
   Future<void> _cargarCatalogoDesdeCerebro() async {
     try {
       var res = await http.get(Uri.parse('${ApiService.baseUrl}/pos/catalogo'));
+      if (!mounted) return;
       if (res.statusCode == 200) {
         var data = jsonDecode(res.body);
-        if (data['exito'] == true && mounted) {
+        if (data['exito'] == true) {
           setState(() => _catalogoReal = data['productos']);
         }
       }
     } catch(e) { debugPrint('Aviso catalogo: $e'); }
   }
 
+  void _mostrarSelectorDeTallasCambio(Map<String, dynamic> p, List<Map<String, dynamic>> tallasBD, bool esEntrada) {
+    showDialog(
+      context: context,
+      builder: (BuildContext contextDialog) {
+        return AlertDialog(
+          title: Text('Selecciona la talla de ${p['sku']}'),
+          content: Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: tallasBD.map((t) {
+              bool agotado = t['cantidad'] <= 0 && !esEntrada; 
+              return ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: agotado ? Colors.grey : Colors.black, foregroundColor: Colors.white),
+                onPressed: agotado ? null : () {
+                  Navigator.pop(contextDialog);
+                  _ejecutarAgregarArticulo(p, sanitizarAlfanumerico(t['talla'].toString()), tallasBD, esEntrada);
+                },
+                child: Text('${t['talla']} (${t['cantidad']} pz)'),
+              );
+            }).toList(),
+          ),
+        );
+      }
+    );
+  }
+
   void _agregarArticulo(String codigo, bool esEntrada) {
     if (codigo.isEmpty) return;
     
-    String skuBuscado = codigo;
-    if (skuBuscado.startsWith('{') && skuBuscado.endsWith('}')) {
-       try {
-         final data = jsonDecode(skuBuscado);
-         if (data.containsKey('sku')) skuBuscado = data['sku'].toString();
-       } catch(e) { debugPrint('Aviso JSON QR: $e'); }
-    }
+    final datosEscaneo = decodificarEscaneo(codigo);
+    String skuLimpio = datosEscaneo['sku']!;
+    String tallaLimpia = datosEscaneo['talla']!;
 
-    final producto = _catalogoReal.where((p) => p["sku"].toString().toLowerCase() == skuBuscado.toLowerCase() || p["nombre"].toString().toLowerCase().contains(skuBuscado.toLowerCase())).toList();
+    final producto = _catalogoReal.where((p) {
+      String dbSkuLimpio = sanitizarAlfanumerico(p["sku"].toString());
+      String dbNombreLimpio = sanitizarAlfanumerico(p["nombre"].toString());
+      return dbSkuLimpio == skuLimpio || dbNombreLimpio.contains(skuLimpio);
+    }).toList();
 
     if (producto.isNotEmpty) {
-      setState(() {
-        if (esEntrada) { _articulosEntran.add(producto.first); _entraController.clear(); } 
-        else { _articulosSalen.add(producto.first); _saleController.clear(); }
-      });
+      var p = producto.first;
+      List<Map<String, dynamic>> tallasBD = parsearTallasBD(p['tallas']);
+
+      if (tallaLimpia == 'UNICA' && tallasBD.isNotEmpty && sanitizarAlfanumerico(tallasBD[0]['talla'].toString()) != 'UNICA') {
+          _mostrarSelectorDeTallasCambio(p, tallasBD, esEntrada);
+          return;
+      }
+
+      _ejecutarAgregarArticulo(p, tallaLimpia, tallasBD, esEntrada);
     } else {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Producto no encontrado'), backgroundColor: Colors.red));
+      if (esEntrada) { _entraController.clear(); _entraFocus.requestFocus(); }
+      else { _saleController.clear(); _saleFocus.requestFocus(); }
     }
   }
 
-  void _procesarCambio() {
-    if (_articulosEntran.isEmpty || _articulosSalen.isEmpty || _motivoController.text.isEmpty) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Faltan artículos o el motivo del cambio'), backgroundColor: Colors.orange)); return; }
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cambio procesado. Inventario actualizado.'), backgroundColor: Colors.green));
-    setState(() { _articulosEntran.clear(); _articulosSalen.clear(); _motivoController.clear(); });
+  void _ejecutarAgregarArticulo(Map<String, dynamic> p, String tallaEncontradaLimpia, List<Map<String, dynamic>> tallasBD, bool esEntrada) {
+    String tallaRealVisual = "ÚNICA";
+    for (var t in tallasBD) {
+      if (sanitizarAlfanumerico(t['talla'].toString()) == tallaEncontradaLimpia) {
+        tallaRealVisual = t['talla'].toString();
+        break;
+      }
+    }
+
+    setState(() {
+      var itemNuevo = Map<String, dynamic>.from(p);
+      itemNuevo['talla_seleccionada'] = tallaRealVisual;
+
+      if (esEntrada) { 
+        _articulosEntran.add(itemNuevo); 
+        _entraController.clear(); 
+        _entraFocus.requestFocus(); 
+      } 
+      else { 
+        _articulosSalen.add(itemNuevo); 
+        _saleController.clear(); 
+        _saleFocus.requestFocus(); 
+      }
+    });
+  }
+
+  Future<void> _procesarCambio() async {
+    if (_articulosEntran.isEmpty || _articulosSalen.isEmpty || _motivoController.text.isEmpty) { 
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Faltan artículos o el motivo del cambio'), backgroundColor: Colors.orange)); 
+      return; 
+    }
+
+    try {
+      final doc = pw.Document();
+      pw.MemoryImage? imageLogo;
+      try { imageLogo = pw.MemoryImage((await rootBundle.load('assets/logo.png')).buffer.asUint8List()); } catch (e) { debugPrint('Aviso Logo: $e'); }
+      
+      final now = DateTime.now();
+      final fechaHora = '${now.day}/${now.month}/${now.year} ${now.hour}:${now.minute}';
+
+      doc.addPage(
+        pw.Page(
+          pageFormat: const PdfPageFormat(80 * PdfPageFormat.mm, double.infinity, marginAll: 5 * PdfPageFormat.mm),
+          build: (pw.Context context) {
+            return pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.center,
+              mainAxisSize: pw.MainAxisSize.min,
+              children: [
+                if (imageLogo != null) pw.Image(imageLogo, width: 40, height: 40),
+                pw.SizedBox(height: 5),
+                pw.Text('JP JEANS', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
+                pw.Text('TICKET DE CAMBIO', style: const pw.TextStyle(fontSize: 10)),
+                pw.SizedBox(height: 5),
+                pw.Text('Fecha: $fechaHora', style: const pw.TextStyle(fontSize: 8)),
+                pw.Divider(borderStyle: pw.BorderStyle.dashed),
+                
+                pw.Text('[ ENTRA AL STOCK ]', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+                ..._articulosEntran.map((item) => pw.Text('${item['sku']} - ${item['nombre']} [Talla: ${item['talla_seleccionada']}]', style: const pw.TextStyle(fontSize: 8))),
+                
+                pw.SizedBox(height: 10),
+                pw.Text('[ SALE AL CLIENTE ]', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+                ..._articulosSalen.map((item) => pw.Text('${item['sku']} - ${item['nombre']} [Talla: ${item['talla_seleccionada']}]', style: const pw.TextStyle(fontSize: 8))),
+                
+                pw.Divider(borderStyle: pw.BorderStyle.dashed),
+                pw.Text('MOTIVO DEL CAMBIO:', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                pw.Text(_motivoController.text, style: const pw.TextStyle(fontSize: 8)),
+                pw.SizedBox(height: 10),
+              ]
+            );
+          }
+        )
+      );
+      await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => doc.save(), name: 'Cambio_JPJeans');
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cambio procesado. Ticket Impreso.'), backgroundColor: Colors.green));
+      setState(() { _articulosEntran.clear(); _articulosSalen.clear(); _motivoController.clear(); });
+    } catch(e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error al imprimir cambio'), backgroundColor: Colors.red));
+    }
   }
 
   @override
@@ -1248,11 +1540,11 @@ class _CambiosViewState extends State<CambiosView> {
         children: [
           const Text('📥 EL CLIENTE REGRESA', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.red)),
           const SizedBox(height: 20),
-          TextField(controller: _entraController, decoration: InputDecoration(labelText: 'Escanear prenda', border: const OutlineInputBorder(), filled: true, fillColor: const Color(0xFFF9F9F9), prefixIcon: const Icon(Icons.qr_code_scanner), suffixIcon: IconButton(icon: const Icon(Icons.search), onPressed: () => _agregarArticulo(_entraController.text, true))), onSubmitted: (val) => _agregarArticulo(val, true)),
+          TextField(controller: _entraController, focusNode: _entraFocus, decoration: InputDecoration(labelText: 'Escanear prenda', border: const OutlineInputBorder(), filled: true, fillColor: const Color(0xFFF9F9F9), prefixIcon: const Icon(Icons.qr_code_scanner), suffixIcon: IconButton(icon: const Icon(Icons.search), onPressed: () => _agregarArticulo(_entraController.text, true))), onSubmitted: (val) => _agregarArticulo(val, true)),
           const SizedBox(height: 10),
           Container(
             constraints: const BoxConstraints(maxHeight: 150),
-            child: ListView.builder(shrinkWrap: true, itemCount: _articulosEntran.length, itemBuilder: (context, i) => ListTile(contentPadding: EdgeInsets.zero, title: Text(_articulosEntran[i]['nombre'], style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)), subtitle: Text('${_articulosEntran[i]['sku']}'), trailing: IconButton(icon: const Icon(Icons.close, color: Colors.red, size: 16), onPressed: () => setState(() => _articulosEntran.removeAt(i))))),
+            child: ListView.builder(shrinkWrap: true, itemCount: _articulosEntran.length, itemBuilder: (context, i) => ListTile(contentPadding: EdgeInsets.zero, title: Text(_articulosEntran[i]['nombre'], style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)), subtitle: Text('${_articulosEntran[i]['sku']} [Talla: ${_articulosEntran[i]['talla_seleccionada']}]'), trailing: IconButton(icon: const Icon(Icons.close, color: Colors.red, size: 16), onPressed: () => setState(() => _articulosEntran.removeAt(i))))),
           )
         ],
       ),
@@ -1265,11 +1557,11 @@ class _CambiosViewState extends State<CambiosView> {
         children: [
           const Text('📤 EL CLIENTE SE LLEVA', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.blue)),
           const SizedBox(height: 20),
-          TextField(controller: _saleController, decoration: InputDecoration(labelText: 'Escanear prenda', border: const OutlineInputBorder(), filled: true, fillColor: const Color(0xFFF9F9F9), prefixIcon: const Icon(Icons.qr_code_scanner), suffixIcon: IconButton(icon: const Icon(Icons.search), onPressed: () => _agregarArticulo(_saleController.text, false))), onSubmitted: (val) => _agregarArticulo(val, false)),
+          TextField(controller: _saleController, focusNode: _saleFocus, decoration: InputDecoration(labelText: 'Escanear prenda', border: const OutlineInputBorder(), filled: true, fillColor: const Color(0xFFF9F9F9), prefixIcon: const Icon(Icons.qr_code_scanner), suffixIcon: IconButton(icon: const Icon(Icons.search), onPressed: () => _agregarArticulo(_saleController.text, false))), onSubmitted: (val) => _agregarArticulo(val, false)),
           const SizedBox(height: 10),
           Container(
             constraints: const BoxConstraints(maxHeight: 150),
-            child: ListView.builder(shrinkWrap: true, itemCount: _articulosSalen.length, itemBuilder: (context, i) => ListTile(contentPadding: EdgeInsets.zero, title: Text(_articulosSalen[i]['nombre'], style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)), subtitle: Text('${_articulosSalen[i]['sku']}'), trailing: IconButton(icon: const Icon(Icons.close, color: Colors.red, size: 16), onPressed: () => setState(() => _articulosSalen.removeAt(i))))),
+            child: ListView.builder(shrinkWrap: true, itemCount: _articulosSalen.length, itemBuilder: (context, i) => ListTile(contentPadding: EdgeInsets.zero, title: Text(_articulosSalen[i]['nombre'], style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)), subtitle: Text('${_articulosSalen[i]['sku']} [Talla: ${_articulosSalen[i]['talla_seleccionada']}]'), trailing: IconButton(icon: const Icon(Icons.close, color: Colors.red, size: 16), onPressed: () => setState(() => _articulosSalen.removeAt(i))))),
           )
         ],
       ),
@@ -1302,7 +1594,7 @@ class _CambiosViewState extends State<CambiosView> {
               const SizedBox(height: 20),
               TextField(controller: _motivoController, decoration: const InputDecoration(labelText: 'Motivo del cambio (Ej. Talla incorrecta)', border: OutlineInputBorder(), filled: true, fillColor: Color(0xFFF9F9F9))),
               const SizedBox(height: 20),
-              SizedBox(width: double.infinity, height: 50, child: ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white), onPressed: _procesarCambio, child: const Text('PROCESAR CAMBIO', style: TextStyle(letterSpacing: 2, fontWeight: FontWeight.bold)))),
+              SizedBox(width: double.infinity, height: 50, child: ElevatedButton.icon(style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white), icon: const Icon(Icons.print), onPressed: _procesarCambio, label: const Text('PROCESAR CAMBIO E IMPRIMIR', style: TextStyle(letterSpacing: 1.5, fontWeight: FontWeight.bold)))),
               const SizedBox(height: 50),
             ],
           ),
@@ -1492,7 +1784,7 @@ class _RegistroGastosViewState extends State<RegistroGastosView> {
 }
 
 // ============================================================================
-// 🚨 VISTA 5: BÓVEDA QR (CON ETIQUETAS EXACTAS 4x2cm Y CÁMARA INCLUIDA)
+// 🚨 VISTA 5: BÓVEDA QR (CON ETIQUETAS A RESGUARDO Y NOMBRE/PRECIO INCLUIDO)
 // ============================================================================
 class BovedaQRView extends StatefulWidget {
   final VoidCallback onCerrar;
@@ -1511,7 +1803,7 @@ class _BovedaQRViewState extends State<BovedaQRView> {
   final TextEditingController _nuevaCantidadController = TextEditingController();
 
   String _qrPreviewData = ''; 
-  String _tallaPreviewMostrada = 'MUESTRA'; // 🚨 Variable para controlar qué talla dice la vista previa
+  String _tallaPreviewMostrada = 'MUESTRA'; 
   
   final ImagePicker _picker = ImagePicker();
   XFile? _fotoSeleccionada; 
@@ -1522,7 +1814,6 @@ class _BovedaQRViewState extends State<BovedaQRView> {
     return _listaTallas.fold(0, (sum, item) => sum + (item['cantidad'] as int));
   }
 
-  // 🚨 NUEVA FUNCIÓN: Diálogo para elegir entre Cámara o Galería
   Future<void> _mostrarOpcionesDeFoto() async {
     showModalBottomSheet(
       context: context,
@@ -1578,23 +1869,22 @@ class _BovedaQRViewState extends State<BovedaQRView> {
   void _eliminarTalla(int index) => setState(() => _listaTallas.removeAt(index));
 
   void _generarVistaPrevia() { 
-    if (_corteController.text.isEmpty || _precioController.text.isEmpty || totalEtiquetas == 0) return;
+    if (_corteController.text.isEmpty || _precioController.text.isEmpty || totalEtiquetas == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Faltan datos o tallas'), backgroundColor: Colors.orange));
+      return;
+    }
     
-    // 🚨 Toma la primera talla de la lista para mostrarla en la vista previa
     String tallaReal = _listaTallas.isNotEmpty ? _listaTallas.first['talla'].toString() : "MUESTRA";
 
     setState(() {
       _tallaPreviewMostrada = tallaReal;
-      _qrPreviewData = jsonEncode({"sku": _corteController.text, "talla": tallaReal});
+      _qrPreviewData = "${_corteController.text} TALLA $tallaReal";
     }); 
   }
 
   Future<void> _imprimirEtiquetas() async {
     if (_qrPreviewData.isEmpty || totalEtiquetas == 0 || _estaCargando) return;
     setState(() => _estaCargando = true);
-
-    // 🚨 Capturamos el ScaffoldMessenger antes del await para quitar la advertencia azul
-    final sm = ScaffoldMessenger.of(context);
 
     String corteLote = _corteController.text;
     String nombreModelo = _modeloController.text;
@@ -1615,37 +1905,42 @@ class _BovedaQRViewState extends State<BovedaQRView> {
       }
 
       var response = await http.Response.fromStream(await request.send());
+      if (!mounted) return;
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         final doc = pw.Document();
-        // 🚨 Formato de 40x20mm SIN forzar el landscape, para que la TSC TE 200 no lo doble dos veces
-        final format4x2 = const PdfPageFormat(40 * PdfPageFormat.mm, 20 * PdfPageFormat.mm, marginAll: 0);
+        final formatNuevo = const PdfPageFormat(51.5 * PdfPageFormat.mm, 25.4 * PdfPageFormat.mm, marginAll: 0);
 
         for (var item in _listaTallas) {
           for(int i=0; i<item['cantidad']; i++) { 
-            String dataQrUnico = jsonEncode({"sku": corteLote, "talla": item['talla']});
+            String dataQrUnico = "$corteLote TALLA ${item['talla']}";
             
             doc.addPage(pw.Page(
-              pageFormat: format4x2,
+              pageFormat: formatNuevo,
               build: (pw.Context context) {
                 return pw.Container(
-                  width: 40 * PdfPageFormat.mm,
-                  height: 20 * PdfPageFormat.mm,
-                  padding: const pw.EdgeInsets.all(1 * PdfPageFormat.mm), 
+                  width: 51.5 * PdfPageFormat.mm,
+                  height: 25.4 * PdfPageFormat.mm,
+                  // 🚨 RESPIRO: 3mm horizontales y 2mm verticales para no cortarse con la impresora térmica
+                  padding: const pw.EdgeInsets.symmetric(horizontal: 3 * PdfPageFormat.mm, vertical: 2 * PdfPageFormat.mm), 
                   child: pw.Row(
                     mainAxisAlignment: pw.MainAxisAlignment.start,
                     crossAxisAlignment: pw.CrossAxisAlignment.center,
                     children: [
-                      pw.BarcodeWidget(color: PdfColors.black, barcode: pw.Barcode.qrCode(), data: dataQrUnico, width: 16 * PdfPageFormat.mm, height: 16 * PdfPageFormat.mm), 
-                      pw.SizedBox(width: 2 * PdfPageFormat.mm),
+                      // 🚨 TAMAÑO PROTEGIDO a 18mm 
+                      pw.BarcodeWidget(color: PdfColors.black, barcode: pw.Barcode.qrCode(), data: dataQrUnico, width: 18 * PdfPageFormat.mm, height: 18 * PdfPageFormat.mm), 
+                      pw.SizedBox(width: 3 * PdfPageFormat.mm),
                       pw.Expanded(
                         child: pw.Column(
                           mainAxisAlignment: pw.MainAxisAlignment.center,
                           crossAxisAlignment: pw.CrossAxisAlignment.start,
                           children: [
-                            pw.Text('JP JEANS', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 7)), 
-                            pw.Text(corteLote, style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold)),
-                            pw.Text('Talla: ${item['talla']}', style: pw.TextStyle(fontSize: 7)), // Aquí imprime la talla real
+                            pw.Text('JP JEANS', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8)), 
+                            pw.SizedBox(height: 1 * PdfPageFormat.mm),
+                            pw.Text(nombreModelo.toUpperCase(), style: pw.TextStyle(fontSize: 6), maxLines: 1),
+                            pw.Text(corteLote, style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                            pw.Text('Talla: ${item['talla']}', style: pw.TextStyle(fontSize: 7)), 
+                            pw.Text('\$${precioProducto.toStringAsFixed(2)}', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)), 
                           ]
                         )
                       )
@@ -1657,16 +1952,16 @@ class _BovedaQRViewState extends State<BovedaQRView> {
           }
         }
 
-        await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => doc.save(), name: 'Etiquetas_4x2_$corteLote');
+        await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => doc.save(), name: 'Etiquetas_$corteLote');
+        if (!mounted) return;
         
-        if (mounted) {
-          setState(() { _listaTallas.clear(); _corteController.clear(); _modeloController.clear(); _precioController.clear(); _qrPreviewData = ''; _fotoSeleccionada = null; _fotoBytes = null;});
-        }
-        sm.showSnackBar(const SnackBar(content: Text('Lote registrado e impresión enviada'), backgroundColor: Colors.green));
+        setState(() { _listaTallas.clear(); _corteController.clear(); _modeloController.clear(); _precioController.clear(); _qrPreviewData = ''; _fotoSeleccionada = null; _fotoBytes = null;});
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Lote registrado e impresión enviada'), backgroundColor: Colors.green));
       }
     } catch (e) { 
       debugPrint('Aviso Etiquetas: $e'); 
-      sm.showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error de conexión o impresión'), backgroundColor: Colors.red));
     } finally { 
       if (mounted) setState(() => _estaCargando = false); 
     }
@@ -1682,7 +1977,7 @@ class _BovedaQRViewState extends State<BovedaQRView> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           InkWell(
-            onTap: _mostrarOpcionesDeFoto, // 🚨 Llama al menú de Cámara/Galería
+            onTap: _mostrarOpcionesDeFoto, 
             child: Container(
               width: double.infinity, height: 140, 
               decoration: BoxDecoration(color: _fotoBytes != null ? Colors.transparent : const Color(0xFFF9F9F9), border: Border.all(color: _fotoBytes != null ? Colors.green : Colors.black26, style: BorderStyle.solid), borderRadius: BorderRadius.circular(8)), 
@@ -1729,9 +2024,9 @@ class _BovedaQRViewState extends State<BovedaQRView> {
       : Column(
           mainAxisAlignment: MainAxisAlignment.center, 
           children: [
-            Container(width: 200, height: 100, padding: const EdgeInsets.all(8), decoration: BoxDecoration(border: Border.all(color: Colors.black), borderRadius: BorderRadius.circular(4)), child: Row(children: [QrImageView(data: _qrPreviewData, version: QrVersions.auto, size: 80.0), const SizedBox(width: 10), Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('JP JEANS', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10)), Text(_corteController.text, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)), Text('Talla: $_tallaPreviewMostrada', style: const TextStyle(fontSize: 10))]))])), // 🚨 Aquí imprime la talla dinámica
+            Container(width: 200, height: 100, padding: const EdgeInsets.all(8), decoration: BoxDecoration(border: Border.all(color: Colors.black), borderRadius: BorderRadius.circular(4)), child: Row(children: [QrImageView(data: _qrPreviewData, version: QrVersions.auto, size: 80.0), const SizedBox(width: 10), Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('JP JEANS', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10)), Text(_corteController.text, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold)), Text('Talla: $_tallaPreviewMostrada', style: const TextStyle(fontSize: 10))]))])), 
             const SizedBox(height: 20), 
-            SizedBox(width: 250, height: 45, child: ElevatedButton.icon(style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white), icon: _estaCargando ? const CircularProgressIndicator(color: Colors.white) : const Icon(Icons.print), label: Text(_estaCargando ? 'PROCESANDO...' : 'IMPRIMIR $totalEtiquetas (4x2cm)'), onPressed: _estaCargando ? null : _imprimirEtiquetas))
+            SizedBox(width: 250, height: 45, child: ElevatedButton.icon(style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white), icon: _estaCargando ? const CircularProgressIndicator(color: Colors.white) : const Icon(Icons.print), label: Text(_estaCargando ? 'PROCESANDO...' : 'IMPRIMIR $totalEtiquetas (5.1 x 2.5 cm)'), onPressed: _estaCargando ? null : _imprimirEtiquetas))
           ]
         );
 
@@ -1851,7 +2146,7 @@ class _EnviosWebViewState extends State<EnviosWebView> {
 }
 
 // ============================================================================
-// 🚨 VISTA 7: INVENTARIO Y STOCK 
+// 🚨 VISTA 7: INVENTARIO Y STOCK (CON REIMPRESIÓN MEJORADA)
 // ============================================================================
 class InventarioStockView extends StatefulWidget {
   const InventarioStockView({super.key});
@@ -1863,6 +2158,7 @@ class InventarioStockView extends StatefulWidget {
 class _InventarioStockViewState extends State<InventarioStockView> {
   List<dynamic> _productosReales = [];
   bool _cargando = true;
+  final ImagePicker _picker = ImagePicker();
 
   @override
   void initState() {
@@ -1883,6 +2179,144 @@ class _InventarioStockViewState extends State<InventarioStockView> {
       if (!mounted) return;
       setState(() => _cargando = false);
     }
+  }
+
+  void _verImagen(String url, String modelo) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.all(10),
+        child: Stack(
+          alignment: Alignment.topRight,
+          children: [
+            InteractiveViewer(
+              panEnabled: true,
+              minScale: 0.5,
+              maxScale: 4,
+              child: Container(
+                width: double.infinity,
+                height: double.infinity,
+                decoration: BoxDecoration(
+                  image: DecorationImage(image: NetworkImage(url), fit: BoxFit.contain),
+                ),
+              ),
+            ),
+            Container(
+              margin: const EdgeInsets.all(10),
+              decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+              child: IconButton(
+                icon: const Icon(Icons.close, color: Colors.white, size: 30),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ),
+            Positioned(
+              bottom: 20, left: 20,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(8)),
+                child: Text(modelo, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18))
+              )
+            )
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _actualizarFotoProducto(int idProducto) async {
+    try {
+      final XFile? image = await _picker.pickImage(source: ImageSource.camera, imageQuality: 80);
+      if (image == null) return;
+      if (!mounted) return; 
+
+      final bytes = await image.readAsBytes();
+      var request = http.MultipartRequest('POST', Uri.parse('${ApiService.baseUrl}/pos/actualizar-foto/$idProducto'));
+      request.files.add(http.MultipartFile.fromBytes('foto', bytes, filename: image.name, contentType: MediaType('image', image.name.split('.').last)));
+      
+      var response = await http.Response.fromStream(await request.send());
+      if (!mounted) return;
+
+      if (response.statusCode == 200) {
+        _cargarDatos();
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Foto actualizada exitosamente'), backgroundColor: Colors.green));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error al guardar la foto en el servidor'), backgroundColor: Colors.red));
+      }
+    } catch (e) {
+      debugPrint('Aviso foto: $e');
+    }
+  }
+
+  Future<void> _reimprimirEtiquetas(Map<String, dynamic> prod) async {
+    String corteLote = prod['sku'];
+    String nombreModelo = prod['nombre'] ?? '';
+    double precioProducto = double.tryParse(prod['precio_venta']?.toString() ?? '0') ?? 0.0;
+    
+    List<Map<String, dynamic>> tallasBD = parsearTallasBD(prod['tallas']);
+
+    int totalEtiquetas = tallasBD.fold(0, (sum, item) => sum + (item['cantidad'] as int));
+    if (totalEtiquetas == 0) {
+       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Este producto tiene 0 piezas en inventario.'), backgroundColor: Colors.orange));
+       return;
+    }
+
+    try {
+      final doc = pw.Document();
+      final formatNuevo = const PdfPageFormat(51.5 * PdfPageFormat.mm, 25.4 * PdfPageFormat.mm, marginAll: 0);
+
+      for (var item in tallasBD) {
+        for(int i=0; i<item['cantidad']; i++) { 
+          String dataQrUnico = "$corteLote TALLA ${item['talla']}";
+          
+          doc.addPage(pw.Page(
+            pageFormat: formatNuevo,
+            build: (pw.Context context) {
+              return pw.Container(
+                width: 51.5 * PdfPageFormat.mm,
+                height: 25.4 * PdfPageFormat.mm,
+                // 🚨 RESPIRO AL IMPRIMIR: 3mm horizontales y 2mm verticales
+                padding: const pw.EdgeInsets.symmetric(horizontal: 3 * PdfPageFormat.mm, vertical: 2 * PdfPageFormat.mm), 
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.start,
+                  crossAxisAlignment: pw.CrossAxisAlignment.center,
+                  children: [
+                    pw.BarcodeWidget(color: PdfColors.black, barcode: pw.Barcode.qrCode(), data: dataQrUnico, width: 18 * PdfPageFormat.mm, height: 18 * PdfPageFormat.mm), 
+                    pw.SizedBox(width: 3 * PdfPageFormat.mm),
+                    pw.Expanded(
+                      child: pw.Column(
+                        mainAxisAlignment: pw.MainAxisAlignment.center,
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text('JP JEANS', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8)), 
+                          pw.SizedBox(height: 1 * PdfPageFormat.mm),
+                          pw.Text(nombreModelo.toUpperCase(), style: pw.TextStyle(fontSize: 6), maxLines: 1),
+                          pw.Text(corteLote, style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                          pw.Text('Talla: ${item['talla']}', style: pw.TextStyle(fontSize: 7)), 
+                          pw.Text('\$${precioProducto.toStringAsFixed(2)}', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)), 
+                        ]
+                      )
+                    )
+                  ]
+                )
+              );
+            }
+          ));
+        }
+      }
+      await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => doc.save(), name: 'Reimpresion_$corteLote');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Impresión enviada'), backgroundColor: Colors.green));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error al imprimir: $e'), backgroundColor: Colors.red));
+    }
+  }
+
+  String _construirStringTallas(dynamic tallasRaw) {
+    List<Map<String, dynamic>> tallas = parsearTallasBD(tallasRaw);
+    if (tallas.isEmpty) return "Sin desglose de tallas";
+    return tallas.map((t) => "${t['talla']}: ${t['cantidad']}").join("  |  ");
   }
 
   @override
@@ -1911,10 +2345,58 @@ class _InventarioStockViewState extends State<InventarioStockView> {
                         separatorBuilder: (c, i) => const Divider(),
                         itemBuilder: (context, index) {
                           final prod = _productosReales[index];
-                          return ListTile(
-                            leading: Image.network(sanearImagen(prod['url_foto_principal']), width: 50, height: 50, fit: BoxFit.cover),
-                            title: Text(prod['nombre'] ?? 'Prenda'),
-                            subtitle: Text('SKU: ${prod['sku']} | Stock: ${prod['stock_bodega']}'),
+                          String fotoUrl = sanearImagen(prod['url_foto_principal']);
+                          String desgloseTallas = _construirStringTallas(prod['tallas']); 
+                          
+                          return Card(
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(side: const BorderSide(color: Colors.black12), borderRadius: BorderRadius.circular(8)),
+                            child: Padding(
+                              padding: const EdgeInsets.all(12.0),
+                              child: Row(
+                                children: [
+                                  GestureDetector(
+                                    onTap: () => _verImagen(fotoUrl, prod['sku']),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: Image.network(fotoUrl, width: 60, height: 60, fit: BoxFit.cover, errorBuilder: (c,e,s) => Container(width: 60, height: 60, color: Colors.grey.shade200, child: const Icon(Icons.image_not_supported, color: Colors.grey))),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(prod['nombre'] ?? 'Prenda', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                                        Text('SKU: ${prod['sku']}', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                                        const SizedBox(height: 4),
+                                        Text(desgloseTallas, style: const TextStyle(color: Colors.black87, fontSize: 11, fontStyle: FontStyle.italic)),
+                                        const SizedBox(height: 4),
+                                        Text('Stock Total: ${prod['stock_bodega']}', style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold, fontSize: 12)),
+                                      ],
+                                    ),
+                                  ),
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
+                                      ElevatedButton.icon(
+                                        style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0)),
+                                        icon: const Icon(Icons.print, size: 14),
+                                        label: const Text('REIMPRIMIR', style: TextStyle(fontSize: 10)),
+                                        onPressed: () => _reimprimirEtiquetas(prod),
+                                      ),
+                                      const SizedBox(height: 5),
+                                      OutlinedButton.icon(
+                                        style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0)),
+                                        icon: const Icon(Icons.camera_alt, size: 14),
+                                        label: const Text('CAMBIAR FOTO', style: TextStyle(fontSize: 10)),
+                                        onPressed: () => _actualizarFotoProducto(prod['id']),
+                                      )
+                                    ],
+                                  )
+                                ],
+                              ),
+                            ),
                           );
                         },
                       ),

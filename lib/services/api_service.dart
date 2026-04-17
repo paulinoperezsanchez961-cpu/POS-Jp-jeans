@@ -1,105 +1,125 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:flutter/foundation.dart'; 
 
 class ApiService {
-  // 🚨 DOMINIO OFICIAL EN PRODUCCIÓN (Conectado a Hostinger/VPS)
   static const String baseUrl = "https://api.jpjeansvip.com/api";
 
-  // 📥 1. PRE-REGISTRO DE MERCANCÍA (Desde Bóveda QR del POS)
-  static Future<bool> preRegistrarProducto({
-    required String sku,
-    required String nombreInterno,
-    required double precio,
-    required List<Map<String, dynamic>> tallas,
-    required int totalPiezas,
-  }) async {
+  // ==========================================================
+  // 📦 INVENTARIO Y POS
+  // ==========================================================
+  static Future<bool> preRegistrarProducto({ required String sku, required String nombreInterno, required double precio, required List<Map<String, dynamic>> tallas, required int totalPiezas }) async {
     try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/pos/pre-registro'),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({
-          "sku": sku,
-          "nombre_interno": nombreInterno,
-          "precio": precio,
-          "tallas": tallas,
-          "stock_total": totalPiezas,
-        }),
-      );
-
+      final response = await http.post(Uri.parse('$baseUrl/pos/pre-registro'), headers: {"Content-Type": "application/json"}, body: jsonEncode({"sku": sku, "nombre_interno": nombreInterno, "precio": precio, "tallas": tallas, "stock_total": totalPiezas}));
       return response.statusCode == 200 || response.statusCode == 201;
-    } catch (e) {
-      debugPrint("Error ApiService (pre-registro): $e");
-      return false;
-    }
+    } catch (e) { return false; }
   }
 
-  // 📤 2. LEER STOCK (Para la pestaña de Inventario)
   static Future<List<dynamic>> obtenerInventario() async {
     try {
       final response = await http.get(Uri.parse('$baseUrl/bodega/inventario'));
-      
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        if (data['exito'] == true) {
-          return data['productos'];
-        }
-      }
+      if (response.statusCode == 200) { final data = jsonDecode(response.body); if (data['exito'] == true) return data['productos']; }
       return [];
-    } catch (e) {
-      debugPrint("Error ApiService (obtener inventario): $e");
-      return [];
-    }
+    } catch (e) { return []; }
   }
 
-  // 🤖 3. HABLAR CON LA IA (Para el Copiloto de la Oficina)
-  static Future<String> preguntarALaIA(String pregunta) async {
-    try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/oficina/ia/copiloto'),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({"pregunta": pregunta}),
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return data['respuesta'] ?? "No obtuve respuesta de la IA.";
-      }
-      return "Error de conexión con el cerebro IA.";
-    } catch (e) {
-      debugPrint("Error ApiService (IA): $e");
-      return "Hubo un fallo al contactar al servidor.";
-    }
-  }
-
-  // 📥 4. GUARDAR CORTE DE CAJA (Desde el POS)
+  // ==========================================================
+  // 💼 CONTABILIDAD Y CORTES
+  // ==========================================================
   static Future<bool> guardarCorteCaja(String cajero, double ventas, double gastos) async {
     try {
-      final res = await http.post(
-        Uri.parse('$baseUrl/pos/corte-caja'),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({"cajero": cajero, "ventas_totales": ventas, "gastos_totales": gastos})
-      );
+      final res = await http.post(Uri.parse('$baseUrl/pos/corte-caja'), headers: {"Content-Type": "application/json"}, body: jsonEncode({"cajero": cajero, "ventas_totales": ventas, "gastos_totales": gastos}));
       return res.statusCode == 200;
-    } catch (e) {
-      debugPrint("Error guardando corte: $e");
-      return false;
-    }
+    } catch (e) { return false; }
   }
 
-  // 📤 5. LEER HISTORIAL DE CORTES (Para la Oficina)
   static Future<List<dynamic>> obtenerHistorialCortes() async {
     try {
       final res = await http.get(Uri.parse('$baseUrl/oficina/cortes-caja'));
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        if (data['exito']) return data['cortes'];
-      }
+      if (res.statusCode == 200) { final data = jsonDecode(res.body); if (data['exito']) return data['cortes']; }
       return [];
-    } catch (e) {
-      debugPrint("Error leyendo cortes: $e");
+    } catch (e) { return []; }
+  }
+
+  // ==========================================================
+  // 🤖 INTELIGENCIA ARTIFICIAL
+  // ==========================================================
+  static Future<String> preguntarALaIA(String pregunta) async {
+    try {
+      final response = await http.post(Uri.parse('$baseUrl/oficina/ia/copiloto'), headers: {"Content-Type": "application/json"}, body: jsonEncode({"pregunta": pregunta}));
+      if (response.statusCode == 200) { final data = jsonDecode(response.body); return data['respuesta'] ?? "Sin respuesta."; }
+      return "Error de conexión.";
+    } catch (e) { return "Fallo al contactar servidor."; }
+  }
+
+  // ==========================================================
+  // 👑 GESTIÓN DE OFICINA Y PRODUCTOS
+  // ==========================================================
+  static Future<bool> eliminarProducto(int idProducto) async {
+    try { final res = await http.delete(Uri.parse('$baseUrl/oficina/productos/$idProducto')); return res.statusCode == 200; } catch (e) { return false; }
+  }
+
+  static Future<bool> actualizarOferta(int idProducto, bool enRebaja, double precioRebaja) async {
+    try {
+      final res = await http.put(Uri.parse('$baseUrl/oficina/productos/$idProducto/oferta'), headers: {"Content-Type": "application/json"}, body: jsonEncode({"en_rebaja": enRebaja ? 1 : 0, "precio_rebaja": precioRebaja}));
+      return res.statusCode == 200;
+    } catch (e) { return false; }
+  }
+
+  static Future<bool> resurtirProducto(int idProducto, List<Map<String, dynamic>> tallasActualizadas, int nuevoStockTotal) async {
+    try {
+      final res = await http.put(Uri.parse('$baseUrl/oficina/productos/$idProducto/resurtir'), headers: {"Content-Type": "application/json"}, body: jsonEncode({"tallas": tallasActualizadas, "stock_bodega": nuevoStockTotal}));
+      return res.statusCode == 200;
+    } catch (e) { return false; }
+  }
+
+  // ==========================================================
+  // 📊 GASTOS AUTOMÁTICOS Y CARGA MASIVA EXCEL
+  // ==========================================================
+  static Future<List<dynamic>> obtenerGastosFijos() async {
+    try {
+      final res = await http.get(Uri.parse('$baseUrl/oficina/gastos-fijos'));
+      if (res.statusCode == 200) { final data = jsonDecode(res.body); if (data['exito']) return data['gastos']; }
       return [];
-    }
+    } catch (e) { return []; }
+  }
+
+  static Future<bool> agregarGastoFijo(String concepto, double monto) async {
+    try {
+      final res = await http.post(Uri.parse('$baseUrl/oficina/gastos-fijos'), headers: {"Content-Type": "application/json"}, body: jsonEncode({"concepto": concepto, "monto": monto}));
+      return res.statusCode == 200;
+    } catch (e) { return false; }
+  }
+
+  static Future<bool> eliminarGastoFijo(int idGasto) async {
+    try { final res = await http.delete(Uri.parse('$baseUrl/oficina/gastos-fijos/$idGasto')); return res.statusCode == 200; } catch (e) { return false; }
+  }
+
+  static Future<bool> cargaMasivaProductos(List<Map<String, dynamic>> productos) async {
+    try {
+      final res = await http.post(Uri.parse('$baseUrl/oficina/carga-masiva'), headers: {"Content-Type": "application/json"}, body: jsonEncode({"productos": productos}));
+      return res.statusCode == 200;
+    } catch (e) { return false; }
+  }
+
+  // ==========================================================
+  // 👥 VENDEDORES (DINERO FIJO)
+  // ==========================================================
+  static Future<List<dynamic>> obtenerVendedores() async {
+    try {
+      final res = await http.get(Uri.parse('$baseUrl/oficina/vendedores'));
+      if (res.statusCode == 200) { final data = jsonDecode(res.body); if (data['exito']) return data['vendedores']; }
+      return [];
+    } catch (e) { return []; }
+  }
+
+  static Future<bool> registrarVendedor(String nombre, String codigo, double comision, double descuento) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/oficina/vendedores'),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({"nombre": nombre, "codigo_creador": codigo, "comision_porcentaje": comision, "descuento_cliente": descuento})
+      );
+      return res.statusCode == 200;
+    } catch (e) { return false; }
   }
 }
-

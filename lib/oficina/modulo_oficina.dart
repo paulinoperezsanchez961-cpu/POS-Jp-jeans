@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'dart:convert'; 
-import 'package:http/http.dart' as http;
 import '../services/api_service.dart'; 
 
 // ============================================================================
@@ -76,12 +75,7 @@ class _ModuloOficinaState extends State<ModuloOficina> {
               NavigationRailDestination(icon: Icon(Icons.settings_outlined), label: Text('AJUSTES')),
             ],
           ),
-          Expanded(
-            child: IndexedStack(
-              index: _index,
-              children: vistas,
-            )
-          ),
+          Expanded(child: IndexedStack(index: _index, children: vistas)),
         ],
       ),
     );
@@ -89,7 +83,7 @@ class _ModuloOficinaState extends State<ModuloOficina> {
 }
 
 // ============================================================================
-// 🚨 VISTA 1: DASHBOARD Y ESTADÍSTICAS (CONECTADO A IA)
+// 🚨 VISTA 1: DASHBOARD Y ESTADÍSTICAS
 // ============================================================================
 class DashboardEstadisticasView extends StatefulWidget {
   const DashboardEstadisticasView({super.key});
@@ -100,13 +94,48 @@ class DashboardEstadisticasView extends StatefulWidget {
 
 class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
   bool _generandoReporte = false;
+  double _ingresosReales = 0.0;
+  double _gastosReales = 0.0;
+  double _gastosFijosTotales = 0.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargarMetricasReales();
+  }
+
+  Future<void> _cargarMetricasReales() async {
+    try {
+      final cortes = await ApiService.obtenerHistorialCortes();
+      final fijos = await ApiService.obtenerGastosFijos();
+      
+      double sumVentas = 0;
+      double sumGastos = 0;
+      for (var c in cortes) {
+        sumVentas += double.tryParse(c['ventas_totales'].toString()) ?? 0;
+        sumGastos += double.tryParse(c['gastos_totales'].toString()) ?? 0;
+      }
+
+      double sumFijos = 0;
+      for(var f in fijos) { sumFijos += double.tryParse(f['monto'].toString()) ?? 0; }
+
+      if (mounted) {
+        setState(() {
+          _ingresosReales = sumVentas;
+          _gastosReales = sumGastos;
+          _gastosFijosTotales = sumFijos;
+        });
+      }
+    } catch (e) {
+      debugPrint("Error: $e");
+    }
+  }
 
   Future<void> _pedirReporteIA() async {
     setState(() => _generandoReporte = true);
+    final respuesta = await ApiService.preguntarALaIA("Dame un resumen ejecutivo super corto (3 líneas máximo) de cómo va el negocio hoy, mencionando que tenemos $_ingresosReales en ingresos y hemos gastado $_gastosReales en caja y $_gastosFijosTotales en fijos.");
     
-    final respuesta = await ApiService.preguntarALaIA("Dame un resumen ejecutivo super corto (3 líneas máximo) de cómo va el negocio hoy, mencionando ventas o pendientes.");
-    
-    if (!mounted) return;
+    if (!mounted) return; 
     setState(() => _generandoReporte = false);
 
     showDialog(
@@ -128,26 +157,7 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
   @override
   Widget build(BuildContext context) {
     bool isMobile = MediaQuery.of(context).size.width < 800;
-
-    Widget tarjetasMetricas = isMobile
-      ? Column(
-          children: [
-            _buildMetricCard('INGRESOS (MES)', '\$145,230.00', Colors.green.shade600, Colors.green.shade50, Icons.trending_up, isHero: true),
-            const SizedBox(height: 16),
-            _buildMetricCard('GASTOS', '\$12,150.00', Colors.red.shade500, Colors.white, Icons.trending_down),
-            const SizedBox(height: 16),
-            _buildMetricCard('CRECIMIENTO', '+18%', Colors.blue.shade600, Colors.white, Icons.rocket_launch),
-          ],
-        )
-      : Row(
-          children: [
-            Expanded(flex: 2, child: _buildMetricCard('INGRESOS TOTALES (MES)', '\$145,230.00', Colors.green.shade600, Colors.green.shade50, Icons.trending_up, isHero: true)),
-            const SizedBox(width: 20),
-            Expanded(flex: 1, child: _buildMetricCard('GASTOS OPERATIVOS', '\$12,150.00', Colors.red.shade500, Colors.white, Icons.trending_down)),
-            const SizedBox(width: 20),
-            Expanded(flex: 1, child: _buildMetricCard('CRECIMIENTO', '+18%', Colors.blue.shade600, Colors.white, Icons.rocket_launch)),
-          ],
-        );
+    double neto = _ingresosReales - _gastosReales - _gastosFijosTotales;
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -168,7 +178,7 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
                     children: [
                       Text('PANEL DE CONTROL', style: TextStyle(fontSize: isMobile ? 20 : 24, fontWeight: FontWeight.w300, letterSpacing: 3)),
                       const SizedBox(height: 4),
-                      const Text('Visión general del rendimiento de JP Jeans.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                      const Text('Métricas descontando gastos operativos y automáticos (renta, luz).', style: TextStyle(color: Colors.grey, fontSize: 12)),
                     ],
                   ),
                   ElevatedButton.icon(
@@ -183,27 +193,31 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
               ),
               const SizedBox(height: 30),
               
-              tarjetasMetricas,
-              
-              const SizedBox(height: 30),
-              
-              Container(
-                width: double.infinity,
-                height: 300, 
-                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.black12)),
-                child: const Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.bar_chart, size: 80, color: Colors.black12),
-                      SizedBox(height: 16),
-                      Text('ZONA DE GRÁFICOS FL_CHART', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, letterSpacing: 2)),
-                      Text('Aquí se mostrará la evolución de ingresos vs gastos.', style: TextStyle(color: Colors.grey, fontSize: 10)),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 50),
+              if (isMobile) ...[
+                _buildMetricCard('INGRESOS TOTALES', '\$${_ingresosReales.toStringAsFixed(2)}', Colors.green.shade600, Colors.green.shade50, Icons.trending_up, isHero: true),
+                const SizedBox(height: 16),
+                _buildMetricCard('GASTOS DE CAJA', '\$${_gastosReales.toStringAsFixed(2)}', Colors.orange.shade500, Colors.white, Icons.receipt_long),
+                const SizedBox(height: 16),
+                _buildMetricCard('GASTOS FIJOS (MES)', '\$${_gastosFijosTotales.toStringAsFixed(2)}', Colors.red.shade500, Colors.white, Icons.business),
+                const SizedBox(height: 16),
+                _buildMetricCard('NETO ACUMULADO', '\$${neto.toStringAsFixed(2)}', Colors.blue.shade600, Colors.blue.shade50, Icons.account_balance, isHero: true),
+              ] else ...[
+                Row(
+                  children: [
+                    Expanded(flex: 2, child: _buildMetricCard('INGRESOS TOTALES', '\$${_ingresosReales.toStringAsFixed(2)}', Colors.green.shade600, Colors.green.shade50, Icons.trending_up, isHero: true)),
+                    const SizedBox(width: 20),
+                    Expanded(flex: 1, child: Column(
+                      children: [
+                        _buildMetricCard('GASTOS DE CAJA', '\$${_gastosReales.toStringAsFixed(2)}', Colors.orange.shade500, Colors.white, Icons.receipt_long),
+                        const SizedBox(height: 16),
+                        _buildMetricCard('GASTOS FIJOS (MES)', '\$${_gastosFijosTotales.toStringAsFixed(2)}', Colors.red.shade500, Colors.white, Icons.business),
+                      ],
+                    )),
+                    const SizedBox(width: 20),
+                    Expanded(flex: 2, child: _buildMetricCard('UTILIDAD NETA', '\$${neto.toStringAsFixed(2)}', Colors.blue.shade600, Colors.blue.shade50, Icons.account_balance, isHero: true)),
+                  ],
+                )
+              ]
             ],
           ),
         ),
@@ -227,11 +241,7 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
             ]
           ),
           SizedBox(height: isHero ? 20 : 16),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(value, style: TextStyle(fontSize: isHero ? 36 : 24, fontWeight: FontWeight.w900, color: colorVal, letterSpacing: -1)),
-          ),
+          FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Text(value, style: TextStyle(fontSize: isHero ? 36 : 24, fontWeight: FontWeight.w900, color: colorVal, letterSpacing: -1))),
         ],
       ),
     );
@@ -239,7 +249,7 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
 }
 
 // ============================================================================
-// 🚨 VISTA 2: INVENTARIO Y STOCK CENTRALIZADO (LIGADO A LA API)
+// 🚨 VISTA 2: INVENTARIO Y STOCK CENTRALIZADO (CARGA MASIVA EXCEL)
 // ============================================================================
 class InventarioOficinaView extends StatefulWidget {
   const InventarioOficinaView({super.key});
@@ -262,26 +272,329 @@ class _InventarioOficinaViewState extends State<InventarioOficinaView> {
     setState(() => _cargando = true);
     final datos = await ApiService.obtenerInventario();
     if (!mounted) return;
-    setState(() {
-      _stockReal = datos;
-      _cargando = false;
-    });
+    setState(() { _stockReal = datos; _cargando = false; });
   }
 
-  void _eliminarProducto(int index) {
+  // 🟢 EXCEL A JSON (PEGADO DIRECTO)
+  void _abrirCargaMasiva() {
+    TextEditingController excelController = TextEditingController();
+    bool procesando = false;
+
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('ACCIÓN NO PERMITIDA', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
-        content: Text('Por seguridad, la eliminación y gestión de drops del producto ${_stockReal[index]['sku']} debe realizarse desde el E-commerce Manager.'),
+      barrierDismissible: false,
+      builder: (contextDialog) => StatefulBuilder(
+        builder: (contextBuilder, setStateDialog) {
+          return AlertDialog(
+            title: const Text('Carga Masiva de Pantalones', style: TextStyle(fontWeight: FontWeight.bold)),
+            content: SizedBox(
+              width: 600,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Copia los datos de tu Excel y pégalos aquí. El formato de las columnas debe ser exactamente este:', style: TextStyle(fontSize: 12)),
+                  const SizedBox(height: 5),
+                  Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(4)), child: const Text('SKU | Nombre Producto | Precio | Tallas (Ej: 28:5, 30:2)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10, color: Colors.blue))),
+                  const SizedBox(height: 16),
+                  TextField(controller: excelController, maxLines: 10, decoration: const InputDecoration(hintText: "Ejemplo:\nC-2001\tJeans Baggy Negro\t550.00\t28:10, 30:5\nC-2002\tPantalón Cargo\t600.00\t32:3, 34:2", border: OutlineInputBorder(), fillColor: Color(0xFFF9F9F9), filled: true)),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(contextDialog), child: const Text('Cerrar', style: TextStyle(color: Colors.grey))),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white),
+                icon: procesando ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Icon(Icons.upload_file, size: 16),
+                label: Text(procesando ? 'SUBIENDO...' : 'PROCESAR Y SUBIR'),
+                onPressed: procesando ? null : () async {
+                  String texto = excelController.text.trim();
+                  if (texto.isEmpty) return;
+
+                  setStateDialog(() => procesando = true);
+                  List<Map<String, dynamic>> productosAEnviar = [];
+                  List<String> filas = texto.split('\n');
+
+                  for (String fila in filas) {
+                    if (fila.trim().isEmpty) continue;
+                    List<String> cols = fila.split('\t'); 
+                    if (cols.length >= 4) {
+                      String sku = cols[0].trim();
+                      String nombre = cols[1].trim();
+                      double precio = double.tryParse(cols[2].trim()) ?? 0;
+                      
+                      List<Map<String, dynamic>> tallasJson = [];
+                      int stockTotal = 0;
+                      List<String> paresTalla = cols[3].split(',');
+                      for (String par in paresTalla) {
+                        List<String> kv = par.split(':');
+                        if (kv.length == 2) {
+                          int cant = int.tryParse(kv[1].trim()) ?? 0;
+                          tallasJson.add({"talla": kv[0].trim(), "cantidad": cant});
+                          stockTotal += cant;
+                        }
+                      }
+
+                      productosAEnviar.add({"sku": sku, "nombre_interno": nombre, "precio": precio, "tallas": tallasJson, "stock_total": stockTotal});
+                    }
+                  }
+
+                  // 🛡️ BLINDAJE CONTRA AVISOS DE LINTER
+                  final nav = Navigator.of(contextDialog);
+                  final sm = ScaffoldMessenger.of(context);
+                  bool exito = await ApiService.cargaMasivaProductos(productosAEnviar);
+                  
+                  nav.pop(); // Cierra el diálogo de forma segura
+                  
+                  if (exito) {
+                    sm.showSnackBar(SnackBar(content: Text('¡Se subieron ${productosAEnviar.length} productos con éxito!'), backgroundColor: Colors.green));
+                    _cargarDatos();
+                  } else {
+                    sm.showSnackBar(const SnackBar(content: Text('Error al subir los datos. Revisa el formato.'), backgroundColor: Colors.red));
+                  }
+                }
+              )
+            ],
+          );
+        }
+      )
+    );
+  }
+
+  List<Map<String, dynamic>> _parsearTallasOficina(dynamic tallasRawData) {
+    List<dynamic> tallasRaw = [];
+    if (tallasRawData != null) {
+      if (tallasRawData is String) {
+        try { tallasRaw = jsonDecode(tallasRawData); } catch (e) { debugPrint('Aviso: $e'); }
+      } else if (tallasRawData is List) {
+        tallasRaw = tallasRawData;
+      }
+    }
+    return tallasRaw.map((e) {
+      if (e is Map) {
+        return {
+          'talla': (e['talla'] ?? e['nombre'] ?? 'ÚNICA').toString().trim().toUpperCase(),
+          'cantidad': int.tryParse(e['cantidad']?.toString() ?? e['stock']?.toString() ?? '0') ?? 0,
+        };
+      } else {
+        return { 'talla': e.toString().trim().toUpperCase(), 'cantidad': 1 };
+      }
+    }).toList();
+  }
+
+  void _abrirGestorResurtido(Map<String, dynamic> prod) {
+    List<Map<String, dynamic>> tallasEnEdicion = _parsearTallasOficina(prod['tallas']);
+    TextEditingController nuevaTallaCtrl = TextEditingController();
+    TextEditingController nuevaCantCtrl = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (contextDialog) {
+        return StatefulBuilder(
+          builder: (contextBuilder, setStateDialog) {
+            int stockTotalCalculado = tallasEnEdicion.fold(0, (sum, item) => sum + (item['cantidad'] as int));
+
+            return AlertDialog(
+              title: Text('Resurtir: ${prod['sku']}', style: const TextStyle(fontWeight: FontWeight.bold)),
+              content: SizedBox(
+                width: 400,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(8)),
+                      child: Row(
+                        children: [
+                          Expanded(child: TextField(controller: nuevaTallaCtrl, decoration: const InputDecoration(labelText: 'Talla', isDense: true, border: OutlineInputBorder(), fillColor: Colors.white, filled: true))),
+                          const SizedBox(width: 8),
+                          Expanded(child: TextField(controller: nuevaCantCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Pzs', isDense: true, border: OutlineInputBorder(), fillColor: Colors.white, filled: true))),
+                          IconButton(
+                            icon: const Icon(Icons.add_circle, color: Colors.green, size: 30),
+                            onPressed: () {
+                              String t = nuevaTallaCtrl.text.trim().toUpperCase();
+                              int c = int.tryParse(nuevaCantCtrl.text) ?? 0;
+                              if (t.isNotEmpty && c > 0) {
+                                setStateDialog(() {
+                                  int idx = tallasEnEdicion.indexWhere((element) => element['talla'] == t);
+                                  if (idx != -1) {
+                                    tallasEnEdicion[idx]['cantidad'] += c;
+                                  } else {
+                                    tallasEnEdicion.add({'talla': t, 'cantidad': c});
+                                  }
+                                  nuevaTallaCtrl.clear();
+                                  nuevaCantCtrl.clear();
+                                });
+                              }
+                            }
+                          )
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    const Divider(),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 200),
+                      child: ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: tallasEnEdicion.length,
+                        itemBuilder: (c, i) {
+                          return ListTile(
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            title: Text('Talla: ${tallasEnEdicion[i]['talla']}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(icon: const Icon(Icons.remove_circle_outline, size: 20), onPressed: () => setStateDialog(() { if (tallasEnEdicion[i]['cantidad'] > 0) tallasEnEdicion[i]['cantidad']--; })),
+                                SizedBox(width: 30, child: Center(child: Text('${tallasEnEdicion[i]['cantidad']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)))),
+                                IconButton(icon: const Icon(Icons.add_circle_outline, size: 20), onPressed: () => setStateDialog(() => tallasEnEdicion[i]['cantidad']++)),
+                                const SizedBox(width: 10),
+                                IconButton(icon: const Icon(Icons.delete, size: 20, color: Colors.red), onPressed: () => setStateDialog(() => tallasEnEdicion.removeAt(i))),
+                              ],
+                            )
+                          );
+                        }
+                      ),
+                    ),
+                    const Divider(),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('STOCK TOTAL:', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
+                        Text('$stockTotalCalculado PZS', style: const TextStyle(fontWeight: FontWeight.w900, color: Colors.blue, fontSize: 20)),
+                      ],
+                    ),
+                  ]
+                )
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(contextDialog), child: const Text('Cancelar', style: TextStyle(color: Colors.grey))),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white),
+                  onPressed: () async {
+                    // 🛡️ BLINDAJE
+                    final nav = Navigator.of(contextDialog);
+                    final sm = ScaffoldMessenger.of(context);
+                    
+                    bool exito = await ApiService.resurtirProducto(prod['id'], tallasEnEdicion, stockTotalCalculado);
+                    nav.pop(); // Cierra seguro
+                    
+                    if (exito) {
+                      sm.showSnackBar(const SnackBar(content: Text('Resurtido exitoso. Stock actualizado.'), backgroundColor: Colors.green));
+                      _cargarDatos();
+                    } else {
+                      sm.showSnackBar(const SnackBar(content: Text('Error al resurtir producto.'), backgroundColor: Colors.red));
+                    }
+                  },
+                  child: const Text('GUARDAR NUEVO STOCK')
+                )
+              ]
+            );
+          }
+        );
+      }
+    );
+  }
+
+  Future<void> _eliminarProductoReal(int idProducto) async {
+    bool? confirmar = await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('¿Eliminar producto?', style: TextStyle(color: Colors.red)),
+        content: const Text('Se borrará del sistema y dejará de aparecer en el mostrador y en la tienda web.'),
         actions: [
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white),
-            onPressed: () => Navigator.pop(context),
-            child: const Text('ENTENDIDO'),
-          )
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar', style: TextStyle(color: Colors.grey))),
+          ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white), onPressed: () => Navigator.pop(context, true), child: const Text('SÍ, ELIMINAR')),
         ],
       )
+    );
+
+    if (confirmar == true) {
+      try {
+        final res = await ApiService.eliminarProducto(idProducto);
+        
+        // 🚨 EL GUARDIA: Detiene todo si el usuario ya cerró la pantalla
+        if (!mounted) return; 
+
+        if (res) {
+          // Como ya pasamos el guardia, es 100% seguro usar el context
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Producto eliminado exitosamente'), backgroundColor: Colors.green));
+          _cargarDatos();
+        }
+      } catch (e) {
+        // 🚨 EL GUARDIA TAMBIÉN VA AQUÍ: Por si da error de red pero la pantalla ya no existe
+        if (!mounted) return; 
+        
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error al eliminar'), backgroundColor: Colors.red));
+      }
+    }
+  }
+
+  void _abrirGestorOferta(Map<String, dynamic> prod) {
+    bool enRebaja = prod['en_rebaja'] == 1 || prod['en_rebaja'] == true;
+    TextEditingController precioOfertaController = TextEditingController(text: prod['precio_rebaja']?.toString() ?? '');
+    
+    showDialog(
+      context: context,
+      builder: (contextDialog) {
+        return StatefulBuilder(
+          builder: (contextBuilder, setStateDialog) {
+            return AlertDialog(
+              title: Text('Gestionar Oferta: ${prod['sku']}'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Precio Normal: \$${prod['precio_venta']}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+                  const SizedBox(height: 20),
+                  SwitchListTile(
+                    title: const Text('Activar Rebaja', style: TextStyle(fontWeight: FontWeight.bold)),
+                    activeThumbColor: Colors.redAccent,
+                    activeTrackColor: Colors.red.shade100,
+                    value: enRebaja,
+                    onChanged: (val) => setStateDialog(() => enRebaja = val),
+                  ),
+                  if (enRebaja) ...[
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: precioOfertaController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: 'Nuevo Precio de Oferta (\$)', border: OutlineInputBorder(), prefixIcon: Icon(Icons.local_offer, color: Colors.redAccent)),
+                    )
+                  ]
+                ],
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(contextDialog), child: const Text('Cancelar', style: TextStyle(color: Colors.grey))),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white),
+                  onPressed: () async {
+                    double precioNuevo = double.tryParse(precioOfertaController.text) ?? 0;
+                    
+                    final nav = Navigator.of(contextDialog);
+                    final sm = ScaffoldMessenger.of(context);
+
+                    if (enRebaja && precioNuevo <= 0) {
+                      sm.showSnackBar(const SnackBar(content: Text('Ingresa un precio válido'), backgroundColor: Colors.orange));
+                      return;
+                    }
+                    
+                    bool exito = await ApiService.actualizarOferta(prod['id'], enRebaja, precioNuevo);
+                    nav.pop(); 
+                    
+                    if(exito){
+                       _cargarDatos();
+                       sm.showSnackBar(const SnackBar(content: Text('Oferta actualizada'), backgroundColor: Colors.green));
+                    }
+                  },
+                  child: const Text('GUARDAR OFERTA'),
+                )
+              ],
+            );
+          }
+        );
+      }
     );
   }
 
@@ -305,22 +618,16 @@ class _InventarioOficinaViewState extends State<InventarioOficinaView> {
                     children: [
                       Text('AUDITORÍA DE INVENTARIO', style: TextStyle(fontSize: isMobile ? 20 : 24, fontWeight: FontWeight.w300, letterSpacing: 3)),
                       const SizedBox(height: 8),
-                      const Text('Supervisa todo lo pre-registrado desde los mostradores.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                      const Text('Gestión de stock individual o subida masiva vía Excel.', style: TextStyle(color: Colors.grey, fontSize: 12)),
                     ],
                   ),
                 ),
-                if (!isMobile)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(8)),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.inventory_2, color: Colors.white, size: 16),
-                        const SizedBox(width: 8),
-                        Text('${_stockReal.length} MODELOS', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
-                      ],
-                    ),
-                  )
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green.shade700, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16)),
+                  icon: const Icon(Icons.table_chart, size: 16),
+                  label: const Text('CARGA MASIVA EXCEL', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10, letterSpacing: 1)),
+                  onPressed: _abrirCargaMasiva,
+                )
               ],
             ),
             const SizedBox(height: 30),
@@ -329,7 +636,7 @@ class _InventarioOficinaViewState extends State<InventarioOficinaView> {
               child: _cargando 
                 ? const Center(child: CircularProgressIndicator(color: Colors.black))
                 : _stockReal.isEmpty 
-                  ? const Center(child: Text("No hay productos pre-registrados en inventario", style: TextStyle(color: Colors.grey)))
+                  ? const Center(child: Text("No hay productos en inventario", style: TextStyle(color: Colors.grey)))
                   : RefreshIndicator(
                       onRefresh: _cargarDatos,
                       color: Colors.black,
@@ -344,21 +651,33 @@ class _InventarioOficinaViewState extends State<InventarioOficinaView> {
                             final String nombre = prod['nombre'] ?? 'Sin nombre';
                             final String corte = prod['sku'] ?? 'N/A';
                             final int totalModelo = prod['stock_bodega'] ?? 0;
-                            final int estadoWeb = prod['estado_web'] ?? 0;
-                            
-                            List<dynamic> tallasRaw = [];
-                            if (prod['tallas'] != null) {
-                              if (prod['tallas'] is String) {
-                                try { tallasRaw = jsonDecode(prod['tallas']); } catch(e) { debugPrint('Aviso: $e'); }
-                              } else {
-                                tallasRaw = prod['tallas'];
-                              }
-                            }
+                            bool enRebaja = prod['en_rebaja'] == 1 || prod['en_rebaja'] == true;
+                            final String fotoUrl = (prod['url_foto_principal'] ?? '').isNotEmpty ? 'https://api.jpjeansvip.com${prod['url_foto_principal']}' : "https://via.placeholder.com/150"; 
 
-                            final String fotoDb = prod['url_foto_principal'] ?? '';
-                            final String fotoUrl = fotoDb.isNotEmpty 
-                                ? 'https://api.jpjeansvip.com$fotoDb' 
-                                : "https://picsum.photos/200?random=$index"; 
+                            Widget botonesAccion = Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                OutlinedButton.icon(
+                                  style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0)),
+                                  icon: const Icon(Icons.add_box, size: 14, color: Colors.green),
+                                  label: const Text('RESURTIR', style: TextStyle(fontSize: 10, color: Colors.green, fontWeight: FontWeight.bold)),
+                                  onPressed: () => _abrirGestorResurtido(prod),
+                                ),
+                                OutlinedButton.icon(
+                                  style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0)),
+                                  icon: const Icon(Icons.local_offer, size: 14, color: Colors.blue),
+                                  label: const Text('OFERTAS', style: TextStyle(fontSize: 10, color: Colors.blue)),
+                                  onPressed: () => _abrirGestorOferta(prod),
+                                ),
+                                OutlinedButton.icon(
+                                  style: OutlinedButton.styleFrom(foregroundColor: Colors.red, side: const BorderSide(color: Colors.redAccent), padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0)),
+                                  icon: const Icon(Icons.delete_outline, size: 14),
+                                  label: const Text('ELIMINAR', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
+                                  onPressed: () => _eliminarProductoReal(prod['id']),
+                                ),
+                              ],
+                            );
 
                             return Padding(
                               padding: const EdgeInsets.all(16.0),
@@ -368,7 +687,7 @@ class _InventarioOficinaViewState extends State<InventarioOficinaView> {
                                     children: [
                                       Row(
                                         children: [
-                                          ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.network(fotoUrl, width: 50, height: 50, fit: BoxFit.cover, errorBuilder: (c,e,s) => Container(width: 50, height: 50, color: Colors.grey.shade200, child: const Icon(Icons.checkroom, color: Colors.grey)))),
+                                          ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.network(fotoUrl, width: 50, height: 50, fit: BoxFit.cover)),
                                           const SizedBox(width: 10),
                                           Expanded(
                                             child: Column(
@@ -379,44 +698,18 @@ class _InventarioOficinaViewState extends State<InventarioOficinaView> {
                                               ],
                                             ),
                                           ),
-                                          Column(
-                                            crossAxisAlignment: CrossAxisAlignment.end,
-                                            children: [
-                                              Text('$totalModelo pzs', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
-                                              IconButton(icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red), onPressed: () => _eliminarProducto(index), padding: EdgeInsets.zero, constraints: const BoxConstraints())
-                                            ],
-                                          )
+                                          Text('$totalModelo pzs', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
                                         ],
                                       ),
                                       const SizedBox(height: 10),
-                                      Row(
-                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Expanded(
-                                            child: Wrap(
-                                              spacing: 8, runSpacing: 8,
-                                              children: tallasRaw.map((e) {
-                                                bool agotado = (e['stock'] ?? 0) == 0;
-                                                return Container(
-                                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                                  decoration: BoxDecoration(color: agotado ? Colors.red.shade50 : Colors.green.shade50, border: Border.all(color: agotado ? Colors.red.shade200 : Colors.green.shade200), borderRadius: BorderRadius.circular(4)),
-                                                  child: Text('${e['talla']}: ${e['stock']} pz', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10, color: agotado ? Colors.red : Colors.green)),
-                                                );
-                                              }).toList(),
-                                            ),
-                                          ),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                                            decoration: BoxDecoration(color: estadoWeb == 1 ? Colors.blue.shade50 : Colors.orange.shade50, borderRadius: BorderRadius.circular(4)),
-                                            child: Text(estadoWeb == 1 ? 'EN LÍNEA' : 'BORRADOR', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: estadoWeb == 1 ? Colors.blue : Colors.orange.shade800, letterSpacing: 1)),
-                                          )
-                                        ],
-                                      ),
+                                      if (enRebaja)
+                                        Container(margin: const EdgeInsets.only(bottom: 10), padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: Colors.redAccent, borderRadius: BorderRadius.circular(4)), child: const Text('OFERTA ACTIVA', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 1))),
+                                      botonesAccion,
                                     ],
                                   )
                                 : Row(
                                     children: [
-                                      ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.network(fotoUrl, width: 60, height: 60, fit: BoxFit.cover, errorBuilder: (c,e,s) => Container(width: 60, height: 60, color: Colors.grey.shade200, child: const Icon(Icons.checkroom, color: Colors.grey)))),
+                                      ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.network(fotoUrl, width: 60, height: 60, fit: BoxFit.cover)),
                                       const SizedBox(width: 20),
                                       Expanded(
                                         flex: 2,
@@ -427,11 +720,8 @@ class _InventarioOficinaViewState extends State<InventarioOficinaView> {
                                               children: [
                                                 Text(nombre, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                                                 const SizedBox(width: 10),
-                                                Container(
-                                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                                  decoration: BoxDecoration(color: estadoWeb == 1 ? Colors.blue.shade50 : Colors.orange.shade50, borderRadius: BorderRadius.circular(4)),
-                                                  child: Text(estadoWeb == 1 ? 'EN LÍNEA' : 'BORRADOR', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: estadoWeb == 1 ? Colors.blue : Colors.orange.shade800, letterSpacing: 1)),
-                                                )
+                                                if (enRebaja)
+                                                  Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: Colors.redAccent, borderRadius: BorderRadius.circular(4)), child: const Text('REBAJADO', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 1)))
                                               ],
                                             ),
                                             Text('SKU/Corte: $corte', style: const TextStyle(color: Colors.grey, fontSize: 10)),
@@ -439,17 +729,13 @@ class _InventarioOficinaViewState extends State<InventarioOficinaView> {
                                         ),
                                       ),
                                       Expanded(
-                                        flex: 3,
-                                        child: Wrap(
-                                          spacing: 8, runSpacing: 8,
-                                          children: tallasRaw.map((e) {
-                                            bool agotado = (e['stock'] ?? 0) == 0;
-                                            return Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                              decoration: BoxDecoration(color: agotado ? Colors.red.shade50 : Colors.green.shade50, border: Border.all(color: agotado ? Colors.red.shade200 : Colors.green.shade200), borderRadius: BorderRadius.circular(4)),
-                                              child: Text('${e['talla']}: ${e['stock']} pz', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: agotado ? Colors.red : Colors.green)),
-                                            );
-                                          }).toList(),
+                                        flex: 1,
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(enRebaja ? '\$${prod['precio_rebaja']}' : '\$${prod['precio_venta']}', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: enRebaja ? Colors.redAccent : Colors.black)),
+                                            if (enRebaja) Text('\$${prod['precio_venta']}', style: const TextStyle(decoration: TextDecoration.lineThrough, color: Colors.grey, fontSize: 10)),
+                                          ],
                                         ),
                                       ),
                                       Column(
@@ -457,12 +743,7 @@ class _InventarioOficinaViewState extends State<InventarioOficinaView> {
                                         children: [
                                           Text('$totalModelo pzs', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
                                           const SizedBox(height: 5),
-                                          OutlinedButton.icon(
-                                            style: OutlinedButton.styleFrom(foregroundColor: Colors.red, side: const BorderSide(color: Colors.redAccent), padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0)),
-                                            icon: const Icon(Icons.delete_outline, size: 14),
-                                            label: const Text('ELIMINAR', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)),
-                                            onPressed: () => _eliminarProducto(index),
-                                          )
+                                          botonesAccion
                                         ],
                                       )
                                     ],
@@ -481,7 +762,7 @@ class _InventarioOficinaViewState extends State<InventarioOficinaView> {
 }
 
 // ============================================================================
-// 🚨 VISTA 3: CONTABILIDAD (Historial de Cortes de Caja REAL)
+// 🚨 VISTA 3: CONTABILIDAD Y GASTOS FIJOS
 // ============================================================================
 class ContabilidadCortesView extends StatefulWidget {
   const ContabilidadCortesView({super.key});
@@ -492,153 +773,177 @@ class ContabilidadCortesView extends StatefulWidget {
 
 class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
   List<dynamic> _historialCortes = [];
+  List<dynamic> _gastosFijos = [];
   bool _cargando = true;
+
+  final TextEditingController _conceptoGastoCtrl = TextEditingController();
+  final TextEditingController _montoGastoCtrl = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _cargarCortes();
+    _cargarTodo();
   }
 
-  Future<void> _cargarCortes() async {
+  Future<void> _cargarTodo() async {
     setState(() => _cargando = true);
-    final datos = await ApiService.obtenerHistorialCortes();
+    final cortes = await ApiService.obtenerHistorialCortes();
+    final gastos = await ApiService.obtenerGastosFijos();
     if (!mounted) return;
     setState(() {
-      _historialCortes = datos;
+      _historialCortes = cortes;
+      _gastosFijos = gastos;
       _cargando = false;
     });
+  }
+
+  Future<void> _guardarGastoFijo() async {
+    if (_conceptoGastoCtrl.text.isEmpty || _montoGastoCtrl.text.isEmpty) return;
+    double monto = double.tryParse(_montoGastoCtrl.text) ?? 0;
+    
+    final sm = ScaffoldMessenger.of(context);
+    bool exito = await ApiService.agregarGastoFijo(_conceptoGastoCtrl.text, monto);
+    
+    if (exito) {
+      _conceptoGastoCtrl.clear(); _montoGastoCtrl.clear();
+      _cargarTodo();
+      sm.showSnackBar(const SnackBar(content: Text('Gasto agregado'), backgroundColor: Colors.green));
+    }
+  }
+
+  Future<void> _eliminarGastoFijo(int id) async {
+    bool exito = await ApiService.eliminarGastoFijo(id);
+    if (exito) _cargarTodo();
+  }
+
+  Widget _buildPestanaCortes() {
+    return _historialCortes.isEmpty
+      ? const Center(child: Text("Aún no se han registrado cortes de caja"))
+      : ListView.separated(
+          itemCount: _historialCortes.length,
+          separatorBuilder: (c, i) => const Divider(height: 1),
+          itemBuilder: (context, index) {
+            final c = _historialCortes[index];
+            final ventas = double.tryParse(c['ventas_totales'].toString()) ?? 0;
+            final gastos = double.tryParse(c['gastos_totales'].toString()) ?? 0;
+            final neto = ventas - gastos;
+            
+            // Extraer detalles si el POS los mandó
+            String detallesTxt = "No hay desglose (Versión POS antigua)";
+            if (c['detalles'] != null && c['detalles'].toString().trim().isNotEmpty) {
+              try {
+                var json = jsonDecode(c['detalles']);
+                detallesTxt = "Piezas Vendidas: ${json['piezas'] ?? 0} | Cambios: ${json['cambios'] ?? 0} | Apartados: ${json['apartados'] ?? 0}";
+              } catch(e){
+                debugPrint("Error al decodificar detalles: $e");
+              }
+            }
+
+            return ExpansionTile(
+              title: Text(c['fecha_formateada'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              subtitle: Text('Cajero: ${c['cajero']}  |  NETO: \$${neto.toStringAsFixed(2)}', style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
+              children: [
+                Container(
+                  color: Colors.grey.shade50,
+                  padding: const EdgeInsets.all(16),
+                  width: double.infinity,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Ventas Brutas: \$${ventas.toStringAsFixed(2)}', style: const TextStyle(fontSize: 12)),
+                      Text('Gastos de Caja: -\$${gastos.toStringAsFixed(2)}', style: const TextStyle(fontSize: 12, color: Colors.red)),
+                      const Divider(),
+                      const Text('DESGLOSE DETALLADO', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10, letterSpacing: 1)),
+                      const SizedBox(height: 5),
+                      Text(detallesTxt, style: const TextStyle(fontSize: 12, color: Colors.black87)),
+                    ],
+                  ),
+                )
+              ],
+            );
+          },
+        );
+  }
+
+  Widget _buildPestanaGastosFijos() {
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(16),
+          color: Colors.grey.shade50,
+          child: Row(
+            children: [
+              Expanded(flex: 2, child: TextField(controller: _conceptoGastoCtrl, decoration: const InputDecoration(labelText: 'Concepto (Renta, Luz)', isDense: true, border: OutlineInputBorder(), fillColor: Colors.white, filled: true))),
+              const SizedBox(width: 10),
+              Expanded(flex: 1, child: TextField(controller: _montoGastoCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: '\$ Monto', isDense: true, border: OutlineInputBorder(), fillColor: Colors.white, filled: true))),
+              const SizedBox(width: 10),
+              ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14)), onPressed: _guardarGastoFijo, child: const Text('AGREGAR'))
+            ],
+          ),
+        ),
+        const Divider(height: 1),
+        Expanded(
+          child: _gastosFijos.isEmpty 
+          ? const Center(child: Text("Sin gastos fijos configurados"))
+          : ListView.builder(
+              itemCount: _gastosFijos.length,
+              itemBuilder: (c, i) => ListTile(
+                title: Text(_gastosFijos[i]['concepto'], style: const TextStyle(fontWeight: FontWeight.bold)),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('\$${_gastosFijos[i]['monto']}', style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 16)),
+                    IconButton(icon: const Icon(Icons.delete, color: Colors.grey, size: 18), onPressed: () => _eliminarGastoFijo(_gastosFijos[i]['id']))
+                  ],
+                ),
+              )
+            )
+        )
+      ],
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     bool isMobile = MediaQuery.of(context).size.width < 800;
 
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: Padding(
-        padding: EdgeInsets.all(isMobile ? 16.0 : 32.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('CONTABILIDAD Y CIERRES', style: TextStyle(fontSize: isMobile ? 20 : 24, fontWeight: FontWeight.w300, letterSpacing: 3)),
-                    const SizedBox(height: 8),
-                    const Text('Historial detallado de los cortes de caja realizados en mostrador.', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                  ],
-                ),
-                OutlinedButton.icon(
-                  onPressed: _cargarCortes, 
-                  icon: const Icon(Icons.refresh, size: 14), 
-                  label: const Text('ACTUALIZAR')
-                )
-              ],
-            ),
-            const SizedBox(height: 30),
-            
-            Expanded(
-              child: Container(
-                padding: EdgeInsets.all(isMobile ? 16 : 24),
-                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.black12)),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('HISTORIAL DE CORTES (BD REAL)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1)),
-                    const Divider(height: 30),
-                    Expanded(
-                      child: _cargando 
-                      ? const Center(child: CircularProgressIndicator(color: Colors.black))
-                      : _historialCortes.isEmpty
-                        ? const Center(child: Text("Aún no se han registrado cortes de caja", style: TextStyle(color: Colors.grey)))
-                        : ListView.separated(
-                            itemCount: _historialCortes.length,
-                            separatorBuilder: (c, i) => const Divider(height: 1),
-                            itemBuilder: (context, index) {
-                              final c = _historialCortes[index];
-                              final ventas = double.tryParse(c['ventas_totales'].toString()) ?? 0;
-                              final gastos = double.tryParse(c['gastos_totales'].toString()) ?? 0;
-                              final neto = ventas - gastos;
-                              
-                              return Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 12.0),
-                                child: isMobile 
-                                ? Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Text(c['fecha_formateada'] ?? 'Sin fecha', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                                          Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(4)), child: Text('\$${neto.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 12))),
-                                        ],
-                                      ),
-                                      Text('Cajero: ${c['cajero']}', style: const TextStyle(color: Colors.grey, fontSize: 10)),
-                                      const SizedBox(height: 8),
-                                      Row(
-                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          Text('Ventas: +\$${ventas.toStringAsFixed(2)}', style: const TextStyle(fontSize: 12, color: Colors.green, fontWeight: FontWeight.bold)),
-                                          Text('Gastos: -\$${gastos.toStringAsFixed(2)}', style: const TextStyle(fontSize: 12, color: Colors.red, fontWeight: FontWeight.bold)),
-                                        ],
-                                      )
-                                    ],
-                                  )
-                                : Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Text(c['fecha_formateada'] ?? 'Sin fecha', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                                          Text('Cajero: ${c['cajero']}', style: const TextStyle(color: Colors.grey, fontSize: 10)),
-                                        ],
-                                      ),
-                                      Row(
-                                        children: [
-                                          Column(
-                                            crossAxisAlignment: CrossAxisAlignment.end,
-                                            children: [
-                                              const Text('Ventas Totales', style: TextStyle(fontSize: 9, color: Colors.grey)),
-                                              Text('+\$${ventas.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green)),
-                                            ],
-                                          ),
-                                          const SizedBox(width: 20),
-                                          Column(
-                                            crossAxisAlignment: CrossAxisAlignment.end,
-                                            children: [
-                                              const Text('Gastos', style: TextStyle(fontSize: 9, color: Colors.grey)),
-                                              Text('-\$${gastos.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
-                                            ],
-                                          ),
-                                          const SizedBox(width: 30),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                                            decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(8)),
-                                            child: Column(
-                                              children: [
-                                                const Text('NETO EN CAJA', style: TextStyle(fontSize: 8, color: Colors.white54, fontWeight: FontWeight.bold)),
-                                                Text('\$${neto.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.w900, color: Colors.white, fontSize: 16)),
-                                              ],
-                                            ),
-                                          )
-                                        ],
-                                      )
-                                    ],
-                                  ),
-                              );
-                            },
-                          ),
-                    )
-                  ],
-                ),
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        backgroundColor: Colors.white,
+        body: Padding(
+          padding: EdgeInsets.all(isMobile ? 16.0 : 32.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('CONTABILIDAD MAESTRA', style: TextStyle(fontSize: isMobile ? 20 : 24, fontWeight: FontWeight.w300, letterSpacing: 3)),
+                      const SizedBox(height: 8),
+                      const Text('Historial de cortes de caja y gestión de gastos automatizados.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                    ],
+                  ),
+                  OutlinedButton.icon(onPressed: _cargarTodo, icon: const Icon(Icons.refresh, size: 14), label: const Text('ACTUALIZAR'))
+                ],
               ),
-            )
-          ],
+              const SizedBox(height: 20),
+              const TabBar(labelColor: Colors.black, indicatorColor: Colors.black, tabs: [Tab(text: 'HISTORIAL DE CORTES'), Tab(text: 'GASTOS AUTOMÁTICOS (FIJOS)')]),
+              const SizedBox(height: 20),
+              
+              Expanded(
+                child: Container(
+                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.black12)),
+                  child: _cargando ? const Center(child: CircularProgressIndicator(color: Colors.black)) : TabBarView(
+                    children: [ _buildPestanaCortes(), _buildPestanaGastosFijos() ]
+                  )
+                ),
+              )
+            ],
+          ),
         ),
       ),
     );
@@ -646,7 +951,7 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
 }
 
 // ============================================================================
-// 🚨 VISTA 4: VENDEDORES Y CÓDIGOS DE CREADOR (CONECTADO A LA API)
+// 🚨 VISTA 4: VENDEDORES (COMISIONES Y DESCUENTOS EN DINERO EXACTO)
 // ============================================================================
 class PromotoresVendedoresView extends StatefulWidget {
   const PromotoresVendedoresView({super.key});
@@ -659,6 +964,7 @@ class _PromotoresVendedoresViewState extends State<PromotoresVendedoresView> {
   final TextEditingController _nombreController = TextEditingController();
   final TextEditingController _codigoController = TextEditingController();
   final TextEditingController _comisionController = TextEditingController();
+  final TextEditingController _descuentoController = TextEditingController(); 
 
   List<dynamic> _vendedoresDB = [];
   bool _cargando = true;
@@ -671,58 +977,32 @@ class _PromotoresVendedoresViewState extends State<PromotoresVendedoresView> {
 
   Future<void> _cargarVendedores() async {
     setState(() => _cargando = true);
-    
-    try {
-      final res = await http.get(Uri.parse('${ApiService.baseUrl}/oficina/vendedores'));
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        if (data['exito']) {
-          if (mounted) {
-            setState(() {
-              _vendedoresDB = data['vendedores'];
-            });
-          }
-        }
-      }
-    } catch (e) {
-      debugPrint("Error al cargar vendedores: $e");
-    }
-    
+    final datos = await ApiService.obtenerVendedores();
     if (mounted) {
-      setState(() => _cargando = false);
+      setState(() {
+        _vendedoresDB = datos;
+        _cargando = false;
+      });
     }
   }
 
   Future<void> _registrarVendedor() async {
-    if (_nombreController.text.isEmpty || _codigoController.text.isEmpty || _comisionController.text.isEmpty) return;
+    if (_nombreController.text.isEmpty || _codigoController.text.isEmpty) return;
     
     final nombre = _nombreController.text.trim();
     final codigo = _codigoController.text.trim().toUpperCase();
-    final comision = double.tryParse(_comisionController.text) ?? 0;
+    final comisionDinero = double.tryParse(_comisionController.text) ?? 0;
+    final descuentoDinero = double.tryParse(_descuentoController.text) ?? 0; 
 
-    try {
-      final res = await http.post(
-        Uri.parse('${ApiService.baseUrl}/oficina/vendedores'),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({
-          "nombre": nombre,
-          "codigo_creador": codigo,
-          "comision_porcentaje": comision
-        })
-      );
+    final sm = ScaffoldMessenger.of(context);
+    bool exito = await ApiService.registrarVendedor(nombre, codigo, comisionDinero, descuentoDinero);
 
-      if (!mounted) return; 
-
-      if (res.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ Vendedor registrado. Listo para vender.'), backgroundColor: Colors.green));
-        _nombreController.clear(); _codigoController.clear(); _comisionController.clear();
-        _cargarVendedores(); 
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('❌ Error al registrar. Revisa los datos.'), backgroundColor: Colors.red));
-      }
-    } catch (e) {
-       if (!mounted) return; 
-       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('❌ Error de conexión.'), backgroundColor: Colors.red));
+    if (exito) {
+      sm.showSnackBar(const SnackBar(content: Text('✅ Vendedor registrado.'), backgroundColor: Colors.green));
+      _nombreController.clear(); _codigoController.clear(); _comisionController.clear(); _descuentoController.clear();
+      _cargarVendedores(); 
+    } else {
+      sm.showSnackBar(const SnackBar(content: Text('❌ Error al registrar. Revisa los datos.'), backgroundColor: Colors.red));
     }
   }
 
@@ -737,11 +1017,17 @@ class _PromotoresVendedoresViewState extends State<PromotoresVendedoresView> {
         children: [
           const Text('ALTA DE VENDEDOR', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1)),
           const SizedBox(height: 20),
-          TextField(controller: _nombreController, decoration: const InputDecoration(labelText: 'Nombre Completo', border: OutlineInputBorder(), filled: true, fillColor: Color(0xFFF9F9F9))),
-          const SizedBox(height: 16),
-          TextField(controller: _codigoController, decoration: const InputDecoration(labelText: 'Código Único (Ej. JUAN_JP)', border: OutlineInputBorder(), filled: true, fillColor: Color(0xFFF9F9F9))),
-          const SizedBox(height: 16),
-          TextField(controller: _comisionController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: '% Comisión (Ej. 15)', border: OutlineInputBorder(), filled: true, fillColor: Color(0xFFF9F9F9))),
+          TextField(controller: _nombreController, decoration: const InputDecoration(labelText: 'Nombre Completo', border: OutlineInputBorder(), filled: true, fillColor: Color(0xFFF9F9F9), isDense: true)),
+          const SizedBox(height: 12),
+          TextField(controller: _codigoController, decoration: const InputDecoration(labelText: 'Código Único (Ej. JUAN_JP)', border: OutlineInputBorder(), filled: true, fillColor: Color(0xFFF9F9F9), isDense: true)),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(child: TextField(controller: _comisionController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: '\$ Le pagas/pz', border: OutlineInputBorder(), filled: true, fillColor: Color(0xFFF0FDF4), isDense: true))),
+              const SizedBox(width: 10),
+              Expanded(child: TextField(controller: _descuentoController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: '\$ Dscto Cliente/pz', border: OutlineInputBorder(), filled: true, fillColor: Color(0xFFFEF2F2), isDense: true))),
+            ],
+          ),
           const SizedBox(height: 24),
           SizedBox(width: double.infinity, height: 45, child: ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white), onPressed: _registrarVendedor, child: const Text('REGISTRAR EN BD', style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1))))
         ],
@@ -756,13 +1042,8 @@ class _PromotoresVendedoresViewState extends State<PromotoresVendedoresView> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Expanded(child: Text('COMISIONES ACUMULADAS', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1))),
-              OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(foregroundColor: Colors.redAccent, side: const BorderSide(color: Colors.redAccent)), 
-                icon: const Icon(Icons.refresh, size: 14), 
-                label: const Text('RECARGAR', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)), 
-                onPressed: _cargarVendedores
-              )
+              const Expanded(child: Text('DEUDA A PROMOTORES', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1))),
+              OutlinedButton.icon(style: OutlinedButton.styleFrom(foregroundColor: Colors.redAccent, side: const BorderSide(color: Colors.redAccent)), icon: const Icon(Icons.refresh, size: 14), label: const Text('RECARGAR', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold)), onPressed: _cargarVendedores)
             ],
           ),
           const Divider(height: 30),
@@ -777,62 +1058,50 @@ class _PromotoresVendedoresViewState extends State<PromotoresVendedoresView> {
                   separatorBuilder: (c, i) => const Divider(height: 1),
                   itemBuilder: (context, index) {
                     final v = _vendedoresDB[index];
-                    final double totalGenerado = double.tryParse(v['ventas_totales'].toString()) ?? 0.0;
-                    final double comisionPorcentaje = double.tryParse(v['comision'].toString()) ?? 0.0;
-                    final comisionPagar = totalGenerado * (comisionPorcentaje / 100);
+                    final int piezasVendidas = int.tryParse(v['piezas_vendidas']?.toString() ?? '0') ?? 0;
+                    final double comisionPorPieza = double.tryParse(v['comision'].toString()) ?? 0.0;
+                    final double descuentoCliente = double.tryParse(v['descuento_cliente']?.toString() ?? '0.0') ?? 0.0;
+                    
+                    // 🚨 MATEMÁTICA EXACTA BASADA EN PIEZAS
+                    final double deudaVendedor = piezasVendidas * comisionPorPieza;
                     
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 12.0),
-                      child: isMobile
-                        ? Column(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(v['nombre'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                              Text('Código: ${v['codigo_creador']} | Com: $comisionPorcentaje%', style: const TextStyle(color: Colors.grey, fontSize: 10)),
-                              const SizedBox(height: 10),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              Text('Código: ${v['codigo_creador']}', style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.bold, fontSize: 11)),
+                              Text('Tú le pagas: \$$comisionPorPieza/pz  |  Cliente ahorra: \$$descuentoCliente/pz', style: const TextStyle(color: Colors.grey, fontSize: 10)),
+                            ],
+                          ),
+                          Row(
+                            children: [
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.end,
                                 children: [
-                                  Text('Ventas: \$${totalGenerado.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                                  Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(4)), child: Text('A Pagar: \$${comisionPagar.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green, fontSize: 12))),
+                                  const Text('Piezas Vendidas', style: TextStyle(fontSize: 9, color: Colors.grey)),
+                                  Text('$piezasVendidas', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black, fontSize: 16)),
                                 ],
+                              ),
+                              const SizedBox(width: 30),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                decoration: BoxDecoration(color: Colors.green.shade50, border: Border.all(color: Colors.green.shade200), borderRadius: BorderRadius.circular(8)),
+                                child: Column(
+                                  children: [
+                                    const Text('DEUDA ACTUAL', style: TextStyle(fontSize: 8, color: Colors.green, fontWeight: FontWeight.bold)),
+                                    Text('\$${deudaVendedor.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.w900, color: Colors.green, fontSize: 16)),
+                                  ],
+                                ),
                               )
                             ],
                           )
-                        : Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(v['nombre'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                                  Text('Código: ${v['codigo_creador']} | Comisión: $comisionPorcentaje%', style: const TextStyle(color: Colors.grey, fontSize: 10)),
-                                ],
-                              ),
-                              Row(
-                                children: [
-                                  Column(
-                                    crossAxisAlignment: CrossAxisAlignment.end,
-                                    children: [
-                                      const Text('Ventas Generadas', style: TextStyle(fontSize: 9, color: Colors.grey)),
-                                      Text('\$${totalGenerado.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black)),
-                                    ],
-                                  ),
-                                  const SizedBox(width: 30),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                                    decoration: BoxDecoration(color: Colors.green.shade50, border: Border.all(color: Colors.green.shade200), borderRadius: BorderRadius.circular(8)),
-                                    child: Column(
-                                      children: [
-                                        const Text('COMISIÓN A PAGAR', style: TextStyle(fontSize: 8, color: Colors.green, fontWeight: FontWeight.bold)),
-                                        Text('\$${comisionPagar.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.w900, color: Colors.green, fontSize: 16)),
-                                      ],
-                                    ),
-                                  )
-                                ],
-                              )
-                            ],
-                          ),
+                        ],
+                      ),
                     );
                   },
                 )
@@ -850,7 +1119,7 @@ class _PromotoresVendedoresViewState extends State<PromotoresVendedoresView> {
             children: [
               Text('GESTIÓN DE VENDEDORES', style: TextStyle(fontSize: isMobile ? 20 : 24, fontWeight: FontWeight.w300, letterSpacing: 3)),
               const SizedBox(height: 8),
-              const Text('Da de alta a promotores y revisa sus comisiones. BD en Tiempo Real.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+              const Text('Sistema de comisiones fijas por prenda vendida.', style: TextStyle(color: Colors.grey, fontSize: 12)),
               const SizedBox(height: 30),
               if (isMobile) ...[
                 panelAlta,
@@ -875,7 +1144,7 @@ class _PromotoresVendedoresViewState extends State<PromotoresVendedoresView> {
 }
 
 // ============================================================================
-// 🚨 VISTA 5: CEREBRO IA (CHAT CON GEMINI CONECTADO AL SERVIDOR)
+// 🚨 VISTA 5: CEREBRO IA
 // ============================================================================
 class InteligenciaArtificialView extends StatefulWidget {
   const InteligenciaArtificialView({super.key});
@@ -921,7 +1190,7 @@ class _InteligenciaArtificialViewState extends State<InteligenciaArtificialView>
 
     final String respuesta = await ApiService.preguntarALaIA(pregunta);
 
-    if (!mounted) return;
+    if (!mounted) return; 
     setState(() {
       _estaCargando = false;
       _mensajes.add({"texto": respuesta, "esUsuario": false});
