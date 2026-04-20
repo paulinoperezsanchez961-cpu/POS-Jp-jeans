@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:convert'; 
+import 'package:http/http.dart' as http;
 import '../services/api_service.dart'; 
 
 // ============================================================================
@@ -96,12 +97,23 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
   bool _generandoReporte = false;
   double _ingresosReales = 0.0;
   double _gastosReales = 0.0;
-  double _gastosFijosTotales = 0.0;
+  double _gastosFijosCalculados = 0.0;
+  
+  int _diasFiltro = 7; 
 
   @override
   void initState() {
     super.initState();
     _cargarMetricasReales();
+  }
+
+  DateTime? _parsearFecha(String fechaFormateada) {
+    try {
+      var partes = fechaFormateada.split(' - ')[0].split('/');
+      return DateTime(int.parse(partes[2]), int.parse(partes[1]), int.parse(partes[0]));
+    } catch(e) {
+      return null;
+    }
   }
 
   Future<void> _cargarMetricasReales() async {
@@ -111,19 +123,42 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
       
       double sumVentas = 0;
       double sumGastos = 0;
+      DateTime hoy = DateTime.now();
+
       for (var c in cortes) {
-        sumVentas += double.tryParse(c['ventas_totales'].toString()) ?? 0;
-        sumGastos += double.tryParse(c['gastos_totales'].toString()) ?? 0;
+        DateTime? fechaCorte = _parsearFecha(c['fecha_formateada'] ?? '');
+        if (fechaCorte != null) {
+          int diferenciaDias = hoy.difference(fechaCorte).inDays;
+          
+          if (_diasFiltro == -1 || diferenciaDias <= _diasFiltro) {
+            sumVentas += double.tryParse(c['ventas_totales'].toString()) ?? 0;
+            sumGastos += double.tryParse(c['gastos_totales'].toString()) ?? 0;
+          }
+        }
       }
 
-      double sumFijos = 0;
-      for(var f in fijos) { sumFijos += double.tryParse(f['monto'].toString()) ?? 0; }
+      double sumFijosSemanales = 0;
+      for(var f in fijos) { sumFijosSemanales += double.tryParse(f['monto'].toString()) ?? 0; }
+
+      double fijosCalculados = 0;
+      if (_diasFiltro > 0) {
+        fijosCalculados = (sumFijosSemanales / 7.0) * _diasFiltro;
+      } else {
+        if (cortes.isNotEmpty) {
+          DateTime? primerCorte = _parsearFecha(cortes.last['fecha_formateada'] ?? '');
+          if (primerCorte != null) {
+            int diasTotales = hoy.difference(primerCorte).inDays;
+            if (diasTotales < 1) diasTotales = 1;
+            fijosCalculados = (sumFijosSemanales / 7.0) * diasTotales;
+          }
+        }
+      }
 
       if (mounted) {
         setState(() {
           _ingresosReales = sumVentas;
           _gastosReales = sumGastos;
-          _gastosFijosTotales = sumFijos;
+          _gastosFijosCalculados = fijosCalculados;
         });
       }
     } catch (e) {
@@ -133,7 +168,9 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
 
   Future<void> _pedirReporteIA() async {
     setState(() => _generandoReporte = true);
-    final respuesta = await ApiService.preguntarALaIA("Dame un resumen ejecutivo super corto (3 líneas máximo) de cómo va el negocio hoy, mencionando que tenemos $_ingresosReales en ingresos y hemos gastado $_gastosReales en caja y $_gastosFijosTotales en fijos.");
+    
+    // 🚨 SINTAXIS PERFECTA: Sin sumas, sin advertencias y con formato de moneda.
+    final respuesta = await ApiService.preguntarALaIA("Dame un resumen ejecutivo super corto (3 líneas máximo) de cómo va el negocio. Estos son los datos de los últimos $_diasFiltro días: INGRESOS \$${_ingresosReales.toStringAsFixed(2)}, GASTOS CAJA \$${_gastosReales.toStringAsFixed(2)}, GASTOS FIJOS \$${_gastosFijosCalculados.toStringAsFixed(2)}.");
     
     if (!mounted) return; 
     setState(() => _generandoReporte = false);
@@ -157,7 +194,7 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
   @override
   Widget build(BuildContext context) {
     bool isMobile = MediaQuery.of(context).size.width < 800;
-    double neto = _ingresosReales - _gastosReales - _gastosFijosTotales;
+    double neto = _ingresosReales - _gastosReales - _gastosFijosCalculados;
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -178,16 +215,42 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
                     children: [
                       Text('PANEL DE CONTROL', style: TextStyle(fontSize: isMobile ? 20 : 24, fontWeight: FontWeight.w300, letterSpacing: 3)),
                       const SizedBox(height: 4),
-                      const Text('Métricas descontando gastos operativos y automáticos (renta, luz).', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                      const Text('Métricas de negocio descontando gastos operativos.', style: TextStyle(color: Colors.grey, fontSize: 12)),
                     ],
                   ),
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20)),
-                    icon: _generandoReporte 
-                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                        : const Icon(Icons.auto_awesome, size: 16),
-                    label: Text(_generandoReporte ? 'PENSANDO...' : 'REPORTE IA', style: const TextStyle(fontWeight: FontWeight.bold)),
-                    onPressed: _generandoReporte ? null : _pedirReporteIA,
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.black12)),
+                        child: DropdownButton<int>(
+                          value: _diasFiltro,
+                          underline: const SizedBox(),
+                          items: const [
+                            DropdownMenuItem(value: 1, child: Text('Último Día (Hoy)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
+                            DropdownMenuItem(value: 7, child: Text('Última Semana (7D)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
+                            DropdownMenuItem(value: 30, child: Text('Último Mes (30D)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
+                            DropdownMenuItem(value: -1, child: Text('Histórico Completo', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
+                          ],
+                          onChanged: (val) {
+                            if (val != null) {
+                              setState(() => _diasFiltro = val);
+                              _cargarMetricasReales();
+                            }
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20)),
+                        icon: _generandoReporte 
+                            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                            : const Icon(Icons.auto_awesome, size: 16),
+                        label: Text(_generandoReporte ? 'PENSANDO...' : 'REPORTE IA', style: const TextStyle(fontWeight: FontWeight.bold)),
+                        onPressed: _generandoReporte ? null : _pedirReporteIA,
+                      )
+                    ],
                   )
                 ],
               ),
@@ -198,7 +261,7 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
                 const SizedBox(height: 16),
                 _buildMetricCard('GASTOS DE CAJA', '\$${_gastosReales.toStringAsFixed(2)}', Colors.orange.shade500, Colors.white, Icons.receipt_long),
                 const SizedBox(height: 16),
-                _buildMetricCard('GASTOS FIJOS (MES)', '\$${_gastosFijosTotales.toStringAsFixed(2)}', Colors.red.shade500, Colors.white, Icons.business),
+                _buildMetricCard('GASTOS FIJOS (AJUSTADO)', '\$${_gastosFijosCalculados.toStringAsFixed(2)}', Colors.red.shade500, Colors.white, Icons.business),
                 const SizedBox(height: 16),
                 _buildMetricCard('NETO ACUMULADO', '\$${neto.toStringAsFixed(2)}', Colors.blue.shade600, Colors.blue.shade50, Icons.account_balance, isHero: true),
               ] else ...[
@@ -210,7 +273,7 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
                       children: [
                         _buildMetricCard('GASTOS DE CAJA', '\$${_gastosReales.toStringAsFixed(2)}', Colors.orange.shade500, Colors.white, Icons.receipt_long),
                         const SizedBox(height: 16),
-                        _buildMetricCard('GASTOS FIJOS (MES)', '\$${_gastosFijosTotales.toStringAsFixed(2)}', Colors.red.shade500, Colors.white, Icons.business),
+                        _buildMetricCard('GASTOS FIJOS (AJUSTADO)', '\$${_gastosFijosCalculados.toStringAsFixed(2)}', Colors.red.shade500, Colors.white, Icons.business),
                       ],
                     )),
                     const SizedBox(width: 20),
@@ -249,7 +312,7 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
 }
 
 // ============================================================================
-// 🚨 VISTA 2: INVENTARIO Y STOCK CENTRALIZADO (CARGA MASIVA EXCEL)
+// 🚨 VISTA 2: INVENTARIO OFICINA
 // ============================================================================
 class InventarioOficinaView extends StatefulWidget {
   const InventarioOficinaView({super.key});
@@ -275,7 +338,6 @@ class _InventarioOficinaViewState extends State<InventarioOficinaView> {
     setState(() { _stockReal = datos; _cargando = false; });
   }
 
-  // 🟢 EXCEL A JSON (PEGADO DIRECTO)
   void _abrirCargaMasiva() {
     TextEditingController excelController = TextEditingController();
     bool procesando = false;
@@ -339,12 +401,10 @@ class _InventarioOficinaViewState extends State<InventarioOficinaView> {
                     }
                   }
 
-                  // 🛡️ BLINDAJE CONTRA AVISOS DE LINTER
                   final nav = Navigator.of(contextDialog);
                   final sm = ScaffoldMessenger.of(context);
                   bool exito = await ApiService.cargaMasivaProductos(productosAEnviar);
-                  
-                  nav.pop(); // Cierra el diálogo de forma segura
+                  nav.pop(); 
                   
                   if (exito) {
                     sm.showSnackBar(SnackBar(content: Text('¡Se subieron ${productosAEnviar.length} productos con éxito!'), backgroundColor: Colors.green));
@@ -473,12 +533,11 @@ class _InventarioOficinaViewState extends State<InventarioOficinaView> {
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white),
                   onPressed: () async {
-                    // 🛡️ BLINDAJE
                     final nav = Navigator.of(contextDialog);
                     final sm = ScaffoldMessenger.of(context);
                     
                     bool exito = await ApiService.resurtirProducto(prod['id'], tallasEnEdicion, stockTotalCalculado);
-                    nav.pop(); // Cierra seguro
+                    nav.pop(); 
                     
                     if (exito) {
                       sm.showSnackBar(const SnackBar(content: Text('Resurtido exitoso. Stock actualizado.'), backgroundColor: Colors.green));
@@ -513,19 +572,14 @@ class _InventarioOficinaViewState extends State<InventarioOficinaView> {
     if (confirmar == true) {
       try {
         final res = await ApiService.eliminarProducto(idProducto);
-        
-        // 🚨 EL GUARDIA: Detiene todo si el usuario ya cerró la pantalla
         if (!mounted) return; 
 
         if (res) {
-          // Como ya pasamos el guardia, es 100% seguro usar el context
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Producto eliminado exitosamente'), backgroundColor: Colors.green));
           _cargarDatos();
         }
       } catch (e) {
-        // 🚨 EL GUARDIA TAMBIÉN VA AQUÍ: Por si da error de red pero la pantalla ya no existe
         if (!mounted) return; 
-        
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error al eliminar'), backgroundColor: Colors.red));
       }
     }
@@ -571,7 +625,6 @@ class _InventarioOficinaViewState extends State<InventarioOficinaView> {
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white),
                   onPressed: () async {
                     double precioNuevo = double.tryParse(precioOfertaController.text) ?? 0;
-                    
                     final nav = Navigator.of(contextDialog);
                     final sm = ScaffoldMessenger.of(context);
 
@@ -647,7 +700,6 @@ class _InventarioOficinaViewState extends State<InventarioOficinaView> {
                           separatorBuilder: (context, index) => const Divider(height: 1),
                           itemBuilder: (context, index) {
                             final prod = _stockReal[index];
-                            
                             final String nombre = prod['nombre'] ?? 'Sin nombre';
                             final String corte = prod['sku'] ?? 'N/A';
                             final int totalModelo = prod['stock_bodega'] ?? 0;
@@ -762,7 +814,7 @@ class _InventarioOficinaViewState extends State<InventarioOficinaView> {
 }
 
 // ============================================================================
-// 🚨 VISTA 3: CONTABILIDAD Y GASTOS FIJOS
+// 🚨 VISTA 3: CONTABILIDAD Y GASTOS FIJOS 
 // ============================================================================
 class ContabilidadCortesView extends StatefulWidget {
   const ContabilidadCortesView({super.key});
@@ -816,6 +868,50 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
     if (exito) _cargarTodo();
   }
 
+  Widget _dibujarDesgloseAvanzado(String detallesStr) {
+    if (detallesStr.trim().isEmpty || detallesStr == '{}' || detallesStr == 'null') {
+        return const Text("Corte ciego (Sin prendas registradas en bitácora).", style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic));
+    }
+    
+    try {
+      Map<String, dynamic> json = jsonDecode(detallesStr);
+      List items = json['items'] ?? [];
+      List apartados = json['apartados'] ?? [];
+      List cambios = json['cambios'] ?? [];
+
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (items.isNotEmpty) ...[
+            const Text('👕 PANTALONES VENDIDOS:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10, color: Colors.blue)),
+            ...items.map((i) {
+                bool esAntiguo = i['sku'] == null || i['sku'].toString().isEmpty;
+                if (esAntiguo) {
+                    return Text('- ${i['nombre']} (\$${i['precio']})', style: const TextStyle(fontSize: 11));
+                } else {
+                    return Text('- ${i['cantidad']}x ${i['sku']} ${i['nombre']} (Talla ${i['talla']})', style: const TextStyle(fontSize: 11));
+                }
+            }),
+            const SizedBox(height: 10),
+          ],
+          if (apartados.isNotEmpty) ...[
+            const Text('🛍️ APARTADOS Y ABONOS:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10, color: Colors.orange)),
+            ...apartados.map((a) => Text('- ${a['tipo']}: ${a['cliente']} (\$${a['monto']})', style: const TextStyle(fontSize: 11))),
+            const SizedBox(height: 10),
+          ],
+          if (cambios.isNotEmpty) ...[
+            const Text('🔄 CAMBIOS FÍSICOS:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10, color: Colors.purple)),
+            ...cambios.map((c) => Text('- Entró: ${c['entra']} | Salió: ${c['sale']}\n  Motivo: ${c['motivo']}', style: const TextStyle(fontSize: 11))),
+          ],
+          if (items.isEmpty && apartados.isEmpty && cambios.isEmpty)
+             const Text("Corte en \$0 sin movimientos.", style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic))
+        ],
+      );
+    } catch(e) {
+      return const Text("Formato incompatible", style: TextStyle(color: Colors.grey, fontSize: 10));
+    }
+  }
+
   Widget _buildPestanaCortes() {
     return _historialCortes.isEmpty
       ? const Center(child: Text("Aún no se han registrado cortes de caja"))
@@ -827,17 +923,6 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
             final ventas = double.tryParse(c['ventas_totales'].toString()) ?? 0;
             final gastos = double.tryParse(c['gastos_totales'].toString()) ?? 0;
             final neto = ventas - gastos;
-            
-            // Extraer detalles si el POS los mandó
-            String detallesTxt = "No hay desglose (Versión POS antigua)";
-            if (c['detalles'] != null && c['detalles'].toString().trim().isNotEmpty) {
-              try {
-                var json = jsonDecode(c['detalles']);
-                detallesTxt = "Piezas Vendidas: ${json['piezas'] ?? 0} | Cambios: ${json['cambios'] ?? 0} | Apartados: ${json['apartados'] ?? 0}";
-              } catch(e){
-                debugPrint("Error al decodificar detalles: $e");
-              }
-            }
 
             return ExpansionTile(
               title: Text(c['fecha_formateada'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
@@ -850,12 +935,10 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Ventas Brutas: \$${ventas.toStringAsFixed(2)}', style: const TextStyle(fontSize: 12)),
-                      Text('Gastos de Caja: -\$${gastos.toStringAsFixed(2)}', style: const TextStyle(fontSize: 12, color: Colors.red)),
+                      Text('Ventas Brutas: \$${ventas.toStringAsFixed(2)}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                      Text('Gastos de Caja: -\$${gastos.toStringAsFixed(2)}', style: const TextStyle(fontSize: 12, color: Colors.red, fontWeight: FontWeight.bold)),
                       const Divider(),
-                      const Text('DESGLOSE DETALLADO', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10, letterSpacing: 1)),
-                      const SizedBox(height: 5),
-                      Text(detallesTxt, style: const TextStyle(fontSize: 12, color: Colors.black87)),
+                      _dibujarDesgloseAvanzado(c['detalles'] ?? ''),
                     ],
                   ),
                 )
@@ -875,7 +958,7 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
             children: [
               Expanded(flex: 2, child: TextField(controller: _conceptoGastoCtrl, decoration: const InputDecoration(labelText: 'Concepto (Renta, Luz)', isDense: true, border: OutlineInputBorder(), fillColor: Colors.white, filled: true))),
               const SizedBox(width: 10),
-              Expanded(flex: 1, child: TextField(controller: _montoGastoCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: '\$ Monto', isDense: true, border: OutlineInputBorder(), fillColor: Colors.white, filled: true))),
+              Expanded(flex: 1, child: TextField(controller: _montoGastoCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: '\$ Monto Semanal', isDense: true, border: OutlineInputBorder(), fillColor: Colors.white, filled: true))),
               const SizedBox(width: 10),
               ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14)), onPressed: _guardarGastoFijo, child: const Text('AGREGAR'))
             ],
@@ -924,14 +1007,14 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
                     children: [
                       Text('CONTABILIDAD MAESTRA', style: TextStyle(fontSize: isMobile ? 20 : 24, fontWeight: FontWeight.w300, letterSpacing: 3)),
                       const SizedBox(height: 8),
-                      const Text('Historial de cortes de caja y gestión de gastos automatizados.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                      const Text('Historial de cortes de caja y gestión de gastos automatizados semanales.', style: TextStyle(color: Colors.grey, fontSize: 12)),
                     ],
                   ),
                   OutlinedButton.icon(onPressed: _cargarTodo, icon: const Icon(Icons.refresh, size: 14), label: const Text('ACTUALIZAR'))
                 ],
               ),
               const SizedBox(height: 20),
-              const TabBar(labelColor: Colors.black, indicatorColor: Colors.black, tabs: [Tab(text: 'HISTORIAL DE CORTES'), Tab(text: 'GASTOS AUTOMÁTICOS (FIJOS)')]),
+              const TabBar(labelColor: Colors.black, indicatorColor: Colors.black, tabs: [Tab(text: 'HISTORIAL DE CORTES'), Tab(text: 'GASTOS FIJOS SEMANALES')]),
               const SizedBox(height: 20),
               
               Expanded(
@@ -951,7 +1034,7 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
 }
 
 // ============================================================================
-// 🚨 VISTA 4: VENDEDORES (COMISIONES Y DESCUENTOS EN DINERO EXACTO)
+// 🚨 VISTA 4: VENDEDORES
 // ============================================================================
 class PromotoresVendedoresView extends StatefulWidget {
   const PromotoresVendedoresView({super.key});
@@ -1003,6 +1086,21 @@ class _PromotoresVendedoresViewState extends State<PromotoresVendedoresView> {
       _cargarVendedores(); 
     } else {
       sm.showSnackBar(const SnackBar(content: Text('❌ Error al registrar. Revisa los datos.'), backgroundColor: Colors.red));
+    }
+  }
+
+  Future<void> _eliminarVendedor(int id) async {
+    final sm = ScaffoldMessenger.of(context);
+    try {
+      final res = await http.delete(Uri.parse('${ApiService.baseUrl}/oficina/vendedores/$id'));
+      if (res.statusCode == 200) {
+        sm.showSnackBar(const SnackBar(content: Text('Vendedor eliminado.'), backgroundColor: Colors.green));
+        _cargarVendedores();
+      } else {
+        sm.showSnackBar(const SnackBar(content: Text('Error al eliminar.'), backgroundColor: Colors.red));
+      }
+    } catch(e) {
+      sm.showSnackBar(const SnackBar(content: Text('Error de conexión.'), backgroundColor: Colors.red));
     }
   }
 
@@ -1062,7 +1160,6 @@ class _PromotoresVendedoresViewState extends State<PromotoresVendedoresView> {
                     final double comisionPorPieza = double.tryParse(v['comision'].toString()) ?? 0.0;
                     final double descuentoCliente = double.tryParse(v['descuento_cliente']?.toString() ?? '0.0') ?? 0.0;
                     
-                    // 🚨 MATEMÁTICA EXACTA BASADA EN PIEZAS
                     final double deudaVendedor = piezasVendidas * comisionPorPieza;
                     
                     return Padding(
@@ -1097,6 +1194,10 @@ class _PromotoresVendedoresViewState extends State<PromotoresVendedoresView> {
                                     Text('\$${deudaVendedor.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.w900, color: Colors.green, fontSize: 16)),
                                   ],
                                 ),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.delete, color: Colors.red),
+                                onPressed: () => _eliminarVendedor(v['id']),
                               )
                             ],
                           )
@@ -1144,7 +1245,7 @@ class _PromotoresVendedoresViewState extends State<PromotoresVendedoresView> {
 }
 
 // ============================================================================
-// 🚨 VISTA 5: CEREBRO IA
+// 🚨 VISTA 5: CEREBRO IA (CON TEXTOS SIN ERRORES Y CONTEXTO REAL INYECTADO)
 // ============================================================================
 class InteligenciaArtificialView extends StatefulWidget {
   const InteligenciaArtificialView({super.key});
@@ -1160,7 +1261,7 @@ class _InteligenciaArtificialViewState extends State<InteligenciaArtificialView>
 
   final List<Map<String, dynamic>> _mensajes = [
     {
-      "texto": "Hola Jefe. Soy la IA Ejecutiva de JP Jeans. Estoy conectada a tu inventario y metricas en tiempo real. ¿Que analizamos hoy?", 
+      "texto": "Hola Jefe. Soy la IA Ejecutiva de JP Jeans. Ahora estoy conectada directamente a tus bases de datos. Pregúntame sobre tus ventas de la semana, stock o gastos y te daré respuestas 100% exactas.", 
       "esUsuario": false
     }
   ];
@@ -1177,18 +1278,57 @@ class _InteligenciaArtificialViewState extends State<InteligenciaArtificialView>
     });
   }
 
+  DateTime? _parsearFecha(String fechaFormateada) {
+    try {
+      var partes = fechaFormateada.split(' - ')[0].split('/');
+      return DateTime(int.parse(partes[2]), int.parse(partes[1]), int.parse(partes[0]));
+    } catch(e) { return null; }
+  }
+
+  Future<String> _armarContextoReal() async {
+    try {
+      final cortes = await ApiService.obtenerHistorialCortes();
+      final inventario = await ApiService.obtenerInventario();
+      
+      double ventasSemana = 0;
+      double gastosSemana = 0;
+      int stockTotal = 0;
+      DateTime hoy = DateTime.now();
+
+      for (var c in cortes) {
+        DateTime? f = _parsearFecha(c['fecha_formateada'] ?? '');
+        if (f != null && hoy.difference(f).inDays <= 7) {
+          ventasSemana += double.tryParse(c['ventas_totales'].toString()) ?? 0;
+          gastosSemana += double.tryParse(c['gastos_totales'].toString()) ?? 0;
+        }
+      }
+      
+      for (var p in inventario) {
+        stockTotal += int.tryParse(p['stock_bodega'].toString()) ?? 0;
+      }
+
+      // 🚨 SINTAXIS PERFECTA: Interpolación limpia.
+      return "DATOS REALES DEL NEGOCIO (NO INVENTES NADA, BASATE SOLO EN ESTO): En los últimos 7 días hemos vendido \$${ventasSemana.toStringAsFixed(2)} y gastado en caja \$${gastosSemana.toStringAsFixed(2)}. Tenemos $stockTotal pantalones en bodega en total. \n\n PREGUNTA DEL DUEÑO: ";
+    } catch (e) {
+      return "PREGUNTA DEL DUEÑO: ";
+    }
+  }
+
   Future<void> _enviarMensaje() async {
-    final String pregunta = _mensajeController.text.trim();
-    if (pregunta.isEmpty) return;
+    final String preguntaVisual = _mensajeController.text.trim();
+    if (preguntaVisual.isEmpty) return;
 
     setState(() {
-      _mensajes.add({"texto": pregunta, "esUsuario": true});
+      _mensajes.add({"texto": preguntaVisual, "esUsuario": true});
       _estaCargando = true;
     });
     _mensajeController.clear();
     _hacerScrollAlFondo();
 
-    final String respuesta = await ApiService.preguntarALaIA(pregunta);
+    String contextoReal = await _armarContextoReal();
+    String preguntaConContexto = contextoReal + preguntaVisual;
+
+    final String respuesta = await ApiService.preguntarALaIA(preguntaConContexto);
 
     if (!mounted) return; 
     setState(() {
@@ -1303,8 +1443,55 @@ class _InteligenciaArtificialViewState extends State<InteligenciaArtificialView>
 // ============================================================================
 // 🚨 VISTA 6: CONFIGURACIÓN Y AJUSTES
 // ============================================================================
-class ConfiguracionOficinaView extends StatelessWidget {
+class ConfiguracionOficinaView extends StatefulWidget {
   const ConfiguracionOficinaView({super.key});
+
+  @override
+  State<ConfiguracionOficinaView> createState() => _ConfiguracionOficinaViewState();
+}
+
+class _ConfiguracionOficinaViewState extends State<ConfiguracionOficinaView> {
+  final TextEditingController _clavePosCtrl = TextEditingController();
+  final TextEditingController _claveOficinaCtrl = TextEditingController();
+  bool _actualizando = false;
+
+  Future<void> _actualizarClaves() async {
+    final clavePos = _clavePosCtrl.text.trim();
+    final claveOficina = _claveOficinaCtrl.text.trim();
+
+    if (clavePos.isEmpty && claveOficina.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Escribe al menos una contraseña para actualizar'), backgroundColor: Colors.orange));
+      return;
+    }
+
+    setState(() => _actualizando = true);
+    final sm = ScaffoldMessenger.of(context);
+
+    try {
+      final res = await http.put(
+        Uri.parse('${ApiService.baseUrl}/oficina/cambiar-claves'),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({
+          "clavePos": clavePos,
+          "claveOficina": claveOficina
+        })
+      );
+
+      if (!mounted) return;
+
+      if (res.statusCode == 200) {
+        sm.showSnackBar(const SnackBar(content: Text('Contraseñas actualizadas con éxito'), backgroundColor: Colors.green));
+        _clavePosCtrl.clear();
+        _claveOficinaCtrl.clear();
+      } else {
+        sm.showSnackBar(const SnackBar(content: Text('Error al actualizar las contraseñas'), backgroundColor: Colors.red));
+      }
+    } catch (e) {
+      sm.showSnackBar(const SnackBar(content: Text('Error de conexión con el servidor'), backgroundColor: Colors.red));
+    } finally {
+      if (mounted) setState(() => _actualizando = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1350,11 +1537,18 @@ class ConfiguracionOficinaView extends StatelessWidget {
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const TextField(obscureText: true, decoration: InputDecoration(labelText: 'Contraseña Cajero (POS)', border: OutlineInputBorder(), isDense: true)),
+                          TextField(controller: _clavePosCtrl, obscureText: true, decoration: const InputDecoration(labelText: 'Nueva Contraseña Cajero (POS)', border: OutlineInputBorder(), isDense: true)),
                           const SizedBox(height: 10),
-                          const TextField(obscureText: true, decoration: InputDecoration(labelText: 'Contraseña Director (Oficina)', border: OutlineInputBorder(), isDense: true)),
+                          TextField(controller: _claveOficinaCtrl, obscureText: true, decoration: const InputDecoration(labelText: 'Nueva Contraseña Director (Oficina)', border: OutlineInputBorder(), isDense: true)),
                           const SizedBox(height: 10),
-                          SizedBox(width: double.infinity, child: ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white), onPressed: () {}, child: const Text('ACTUALIZAR CLAVES'))),
+                          SizedBox(
+                            width: double.infinity, 
+                            child: ElevatedButton(
+                              style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white), 
+                              onPressed: _actualizando ? null : _actualizarClaves, 
+                              child: _actualizando ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Text('ACTUALIZAR CLAVES')
+                            )
+                          ),
                         ],
                       )
                     ),

@@ -25,9 +25,19 @@ class ApiService {
   // ==========================================================
   // 💼 CONTABILIDAD Y CORTES
   // ==========================================================
-  static Future<bool> guardarCorteCaja(String cajero, double ventas, double gastos) async {
+  // 🚨 MODIFICADO: Ahora acepta los detalles del corte
+  static Future<bool> guardarCorteCaja(String cajero, double ventas, double gastos, {Map<String, dynamic>? detalles}) async {
     try {
-      final res = await http.post(Uri.parse('$baseUrl/pos/corte-caja'), headers: {"Content-Type": "application/json"}, body: jsonEncode({"cajero": cajero, "ventas_totales": ventas, "gastos_totales": gastos}));
+      final res = await http.post(
+        Uri.parse('$baseUrl/pos/corte-caja'), 
+        headers: {"Content-Type": "application/json"}, 
+        body: jsonEncode({
+          "cajero": cajero, 
+          "ventas_totales": ventas, 
+          "gastos_totales": gastos,
+          "detalles": detalles ?? {} // <-- Aquí viajará la información de las prendas
+        })
+      );
       return res.statusCode == 200;
     } catch (e) { return false; }
   }
@@ -121,5 +131,21 @@ class ApiService {
       );
       return res.statusCode == 200;
     } catch (e) { return false; }
+  }
+
+  // ==========================================================
+  // 🔐 SEGURIDAD
+  // ==========================================================
+  static Future<bool> verificarClaveAdmin(String password) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/oficina/verificar-admin'),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({"password": password})
+      );
+      return res.statusCode == 200;
+    } catch (e) {
+      return false;
+    }
   }
 }
