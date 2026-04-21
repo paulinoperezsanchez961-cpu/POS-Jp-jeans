@@ -25,15 +25,17 @@ class ApiService {
   // ==========================================================
   // 💼 CONTABILIDAD Y CORTES
   // ==========================================================
-  static Future<bool> guardarCorteCaja(String cajero, double ventas, double gastos, {Map<String, dynamic>? detalles}) async {
+  // 🚨 ACTUALIZADO: Envía las bolsas separadas (Efectivo y Tarjeta) al Cerebro
+  static Future<bool> guardarCorteCaja(String cajero, double ventasEfectivo, double ventasTarjeta, double gastosTotales, {Map<String, dynamic>? detalles}) async {
     try {
       final res = await http.post(
         Uri.parse('$baseUrl/pos/corte-caja'), 
         headers: {"Content-Type": "application/json"}, 
         body: jsonEncode({
           "cajero": cajero, 
-          "ventas_totales": ventas, 
-          "gastos_totales": gastos,
+          "ventas_efectivo": ventasEfectivo, 
+          "ventas_tarjeta": ventasTarjeta, 
+          "gastos_totales": gastosTotales,
           "detalles": detalles ?? {} 
         })
       );
@@ -49,15 +51,19 @@ class ApiService {
     } catch (e) { return []; }
   }
 
-  static Future<List<dynamic>> obtenerVentasEnVivo() async {
+  // 🚨 ACTUALIZADO: Ahora recibe rango de fechas para el Radar (Filtros de semana)
+  static Future<List<dynamic>> obtenerVentasEnVivo({String? fechaInicio, String? fechaFin}) async {
     try {
-      final res = await http.get(Uri.parse('$baseUrl/oficina/ventas-en-vivo'));
+      String urlStr = '$baseUrl/oficina/ventas-en-vivo';
+      if (fechaInicio != null && fechaFin != null) {
+        urlStr += '?fechaInicio=$fechaInicio&fechaFin=$fechaFin';
+      }
+      final res = await http.get(Uri.parse(urlStr));
       if (res.statusCode == 200) { final data = jsonDecode(res.body); if (data['exito']) return data['ventas']; }
       return [];
     } catch (e) { return []; }
   }
 
-  // 🚨 NUEVA: Registra los cambios físicos en la base de datos
   static Future<bool> procesarCambioFisico(List<Map<String, dynamic>> entran, List<Map<String, dynamic>> salen, String motivo) async {
     try {
       final res = await http.post(

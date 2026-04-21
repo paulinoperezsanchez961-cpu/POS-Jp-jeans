@@ -54,7 +54,6 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
     if (exito) _cargarTodo();
   }
 
-  // 🚨 TRADUCTOR VISUAL MEJORADO: Estructura los SKUs y Vendedores
   Widget _dibujarDesgloseAvanzado(String detallesStr) {
     if (detallesStr.trim().isEmpty || detallesStr == '{}' || detallesStr == 'null') {
         return const Text("Corte ciego (Sin prendas registradas en bitácora).", style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic));
@@ -76,14 +75,10 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
                 String nombreRaw = i['nombre']?.toString() ?? '';
                 String precioRaw = i['precio']?.toString() ?? '0';
 
-                // Si detecta el nuevo formato detallado del servidor
                 if (nombreRaw.contains('[SKU:')) {
-                    // Separar los items del vendedor
                     List<String> partesVendedor = nombreRaw.split('| Vendedor:');
                     String itemsVenta = partesVendedor[0];
                     String vendedor = partesVendedor.length > 1 ? partesVendedor[1].trim() : 'Mostrador General';
-
-                    // Separar cada prenda individual
                     List<String> lineasItems = itemsVenta.split('c/u.');
 
                     return Container(
@@ -121,7 +116,6 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
                       ),
                     );
                 } else {
-                   // Formato antiguo (ventas hechas antes de la actualización)
                    bool esAntiguo = i['sku'] == null || i['sku'].toString().isEmpty;
                    if (esAntiguo) {
                        return Text('- $nombreRaw (\$$precioRaw)', style: const TextStyle(fontSize: 11));
@@ -151,13 +145,11 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          // 🚨 CORRECCIÓN AQUÍ: Quitamos las comillas innecesarias
                           Text(a['tipo'].toString().replaceAll('_', ' '), style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.orange)),
                           Text('+\$${a['monto']}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: Colors.orange)),
                         ],
                       ),
                       const SizedBox(height: 4),
-                          // 🚨 Y CORRECCIÓN AQUÍ: Quitamos las comillas innecesarias
                       Text(a['cliente'].toString(), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500)),
                     ],
                   ),
@@ -194,13 +186,19 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
           separatorBuilder: (c, i) => const Divider(height: 1),
           itemBuilder: (context, index) {
             final c = _historialCortes[index];
-            final ventas = double.tryParse(c['ventas_totales'].toString()) ?? 0;
+            
+            // 🚨 AQUÍ EXTRAEMOS LAS DOS BOLSAS DE DINERO SEPARADAS QUE LE PUSIMOS AL SERVER
+            final ventasTotales = double.tryParse(c['ventas_totales'].toString()) ?? 0;
+            final ventasEfectivo = double.tryParse(c['ventas_efectivo']?.toString() ?? '0') ?? 0;
+            final ventasTarjeta = double.tryParse(c['ventas_tarjeta']?.toString() ?? '0') ?? 0;
             final gastos = double.tryParse(c['gastos_totales'].toString()) ?? 0;
-            final neto = ventas - gastos;
+            
+            // 🚨 MAGIA FINANCIERA: Lo que el cajero debe entregar en mano (Cajón - Gastos)
+            final entregaFisicaCajero = ventasEfectivo - gastos;
 
             return ExpansionTile(
               title: Text(c['fecha_formateada'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-              subtitle: Text('Cajero: ${c['cajero']}  |  ENTREGA NETA: \$${neto.toStringAsFixed(2)}', style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
+              subtitle: Text('Cajero: ${c['cajero']}  |  ENTREGA FÍSICA: \$${entregaFisicaCajero.toStringAsFixed(2)}', style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
               children: [
                 Container(
                   color: Colors.grey.shade50,
@@ -212,21 +210,44 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text('Ingresos en Caja:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                          Text('\$${ventas.toStringAsFixed(2)}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black)),
+                          const Text('Ventas Totales:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                          Text('\$${ventasTotales.toStringAsFixed(2)}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black)),
+                        ],
+                      ),
+                      const SizedBox(height: 5),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('  💳 Pagado con Tarjeta (Banco):', style: TextStyle(fontSize: 11, color: Colors.blue)),
+                          Text('\$${ventasTarjeta.toStringAsFixed(2)}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blue)),
                         ],
                       ),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text('Gastos en Efectivo:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                          Text('-\$${gastos.toStringAsFixed(2)}', style: const TextStyle(fontSize: 12, color: Colors.red, fontWeight: FontWeight.bold)),
+                          const Text('  💵 Cobrado en Efectivo (Cajón):', style: TextStyle(fontSize: 11, color: Colors.green)),
+                          Text('\$${ventasEfectivo.toStringAsFixed(2)}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.green)),
+                        ],
+                      ),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('  ➖ Gastos en Efectivo:', style: TextStyle(fontSize: 11, color: Colors.red)),
+                          Text('-\$${gastos.toStringAsFixed(2)}', style: const TextStyle(fontSize: 11, color: Colors.red, fontWeight: FontWeight.bold)),
                         ],
                       ),
                       const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 8.0),
+                        padding: EdgeInsets.symmetric(vertical: 12.0),
                         child: Divider(color: Colors.black26),
                       ),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('DINERO FÍSICO A ENTREGAR:', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900)),
+                          Text('\$${entregaFisicaCajero.toStringAsFixed(2)}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Colors.green)),
+                        ],
+                      ),
+                      const SizedBox(height: 15),
                       _dibujarDesgloseAvanzado(c['detalles'] ?? ''),
                     ],
                   ),
