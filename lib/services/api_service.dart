@@ -25,7 +25,6 @@ class ApiService {
   // ==========================================================
   // 💼 CONTABILIDAD Y CORTES
   // ==========================================================
-  // 🚨 MODIFICADO: Ahora acepta los detalles del corte
   static Future<bool> guardarCorteCaja(String cajero, double ventas, double gastos, {Map<String, dynamic>? detalles}) async {
     try {
       final res = await http.post(
@@ -35,7 +34,7 @@ class ApiService {
           "cajero": cajero, 
           "ventas_totales": ventas, 
           "gastos_totales": gastos,
-          "detalles": detalles ?? {} // <-- Aquí viajará la información de las prendas
+          "detalles": detalles ?? {} 
         })
       );
       return res.statusCode == 200;
@@ -48,6 +47,26 @@ class ApiService {
       if (res.statusCode == 200) { final data = jsonDecode(res.body); if (data['exito']) return data['cortes']; }
       return [];
     } catch (e) { return []; }
+  }
+
+  static Future<List<dynamic>> obtenerVentasEnVivo() async {
+    try {
+      final res = await http.get(Uri.parse('$baseUrl/oficina/ventas-en-vivo'));
+      if (res.statusCode == 200) { final data = jsonDecode(res.body); if (data['exito']) return data['ventas']; }
+      return [];
+    } catch (e) { return []; }
+  }
+
+  // 🚨 NUEVA: Registra los cambios físicos en la base de datos
+  static Future<bool> procesarCambioFisico(List<Map<String, dynamic>> entran, List<Map<String, dynamic>> salen, String motivo) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/pos/cambio'),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({"entran": entran, "salen": salen, "motivo": motivo})
+      );
+      return res.statusCode == 200;
+    } catch (e) { return false; }
   }
 
   // ==========================================================
@@ -112,7 +131,7 @@ class ApiService {
   }
 
   // ==========================================================
-  // 👥 VENDEDORES (DINERO FIJO)
+  // 👥 VENDEDORES Y CUPONES
   // ==========================================================
   static Future<List<dynamic>> obtenerVendedores() async {
     try {
@@ -133,6 +152,21 @@ class ApiService {
     } catch (e) { return false; }
   }
 
+  static Future<bool> eliminarVendedor(int idVendedor) async {
+    try {
+      final res = await http.delete(Uri.parse('$baseUrl/oficina/vendedores/$idVendedor'));
+      return res.statusCode == 200;
+    } catch (e) { return false; }
+  }
+
+  static Future<Map<String, dynamic>> validarCupon(String codigo) async {
+    try {
+      final res = await http.get(Uri.parse('$baseUrl/cupones/validar/$codigo'));
+      if (res.statusCode == 200) { return jsonDecode(res.body); }
+      return {'valido': false};
+    } catch (e) { return {'valido': false}; }
+  }
+
   // ==========================================================
   // 🔐 SEGURIDAD
   // ==========================================================
@@ -147,5 +181,16 @@ class ApiService {
     } catch (e) {
       return false;
     }
+  }
+
+  static Future<bool> cambiarClaves(String clavePos, String claveOficina) async {
+    try {
+      final res = await http.put(
+        Uri.parse('$baseUrl/oficina/cambiar-claves'),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({"clavePos": clavePos, "claveOficina": claveOficina})
+      );
+      return res.statusCode == 200;
+    } catch (e) { return false; }
   }
 }

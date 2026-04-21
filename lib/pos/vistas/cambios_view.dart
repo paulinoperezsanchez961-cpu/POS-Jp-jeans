@@ -9,13 +9,9 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:http/http.dart' as http;
 
-// Rutas relativas a los servicios y utilidades
 import '../../services/api_service.dart';
 import '../utils/escaner_utils.dart';
 
-// ============================================================================
-// 🚨 VISTA 2: CAMBIOS Y DEVOLUCIONES CON TICKET
-// ============================================================================
 class CambiosView extends StatefulWidget {
   const CambiosView({super.key});
   @override
@@ -32,6 +28,8 @@ class _CambiosViewState extends State<CambiosView> {
   final List<Map<String, dynamic>> _articulosEntran = [];
   final List<Map<String, dynamic>> _articulosSalen = [];
   List<dynamic> _catalogoReal = [];
+  
+  bool _procesando = false; 
 
   @override
   void initState() {
@@ -76,7 +74,6 @@ class _CambiosViewState extends State<CambiosView> {
     await prefs.setString('caja_cambios_detalles', jsonEncode(cambios));
   }
 
-  // 🚨 NUEVA FUNCIÓN: Abre la cámara para leer el código QR
   Future<void> _escanearConCamara(bool esEntrada) async {
     try {
       var result = await BarcodeScanner.scan();
@@ -185,59 +182,76 @@ class _CambiosViewState extends State<CambiosView> {
     }
 
     final sm = ScaffoldMessenger.of(context); 
+    setState(() => _procesando = true);
 
     try {
-      final doc = pw.Document();
-      pw.MemoryImage? imageLogo;
-      try { imageLogo = pw.MemoryImage((await rootBundle.load('assets/logo.png')).buffer.asUint8List()); } catch (e) { debugPrint('Aviso Logo: $e'); }
-      
-      final now = DateTime.now();
-      final fechaHora = '${now.day}/${now.month}/${now.year} ${now.hour}:${now.minute}';
-
-      doc.addPage(
-        pw.Page(
-          pageFormat: const PdfPageFormat(80 * PdfPageFormat.mm, double.infinity, marginAll: 5 * PdfPageFormat.mm),
-          build: (pw.Context context) {
-            return pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.center,
-              mainAxisSize: pw.MainAxisSize.min,
-              children: [
-                if (imageLogo != null) pw.Image(imageLogo, width: 40, height: 40),
-                pw.SizedBox(height: 5),
-                pw.Text('JP JEANS', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
-                pw.Text('TICKET DE CAMBIO', style: const pw.TextStyle(fontSize: 10)),
-                pw.SizedBox(height: 5),
-                pw.Text('Fecha: $fechaHora', style: const pw.TextStyle(fontSize: 8)),
-                pw.Divider(borderStyle: pw.BorderStyle.dashed),
-                
-                pw.Text('[ ENTRA AL STOCK ]', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
-                ..._articulosEntran.map((item) => pw.Text('${item['sku']} - ${item['nombre']} [Talla: ${item['talla_seleccionada']}]', style: const pw.TextStyle(fontSize: 8))),
-                
-                pw.SizedBox(height: 10),
-                pw.Text('[ SALE AL CLIENTE ]', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
-                ..._articulosSalen.map((item) => pw.Text('${item['sku']} - ${item['nombre']} [Talla: ${item['talla_seleccionada']}]', style: const pw.TextStyle(fontSize: 8))),
-                
-                pw.Divider(borderStyle: pw.BorderStyle.dashed),
-                pw.Text('MOTIVO DEL CAMBIO:', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
-                pw.Text(_motivoController.text.trim(), style: const pw.TextStyle(fontSize: 8)),
-                pw.SizedBox(height: 10),
-              ]
-            );
-          }
-        )
-      );
-      
-      await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => doc.save(), name: 'Cambio_JPJeans');
+      // 🚨 Manda la señal al servidor para que actualice los stocks físicos
+      bool exito = await ApiService.procesarCambioFisico(_articulosEntran, _articulosSalen, _motivoController.text.trim());
       
       if (!mounted) return;
 
-      await _registrarCambioEnMemoria();
+      if (exito) {
+        final doc = pw.Document();
+        pw.MemoryImage? imageLogo;
+        try { imageLogo = pw.MemoryImage((await rootBundle.load('assets/logo.png')).buffer.asUint8List()); } catch (e) { debugPrint('Aviso Logo: $e'); }
+        
+        final now = DateTime.now();
+        final fechaHora = '${now.day}/${now.month}/${now.year} ${now.hour}:${now.minute}';
 
-      sm.showSnackBar(const SnackBar(content: Text('Cambio registrado e impreso exitosamente.'), backgroundColor: Colors.green));
-      setState(() { _articulosEntran.clear(); _articulosSalen.clear(); _motivoController.clear(); });
+        doc.addPage(
+          pw.Page(
+            pageFormat: const PdfPageFormat(80 * PdfPageFormat.mm, double.infinity, marginAll: 5 * PdfPageFormat.mm),
+            build: (pw.Context context) {
+              return pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.center,
+                mainAxisSize: pw.MainAxisSize.min,
+                children: [
+                  if (imageLogo != null) pw.Image(imageLogo, width: 40, height: 40),
+                  pw.SizedBox(height: 5),
+                  pw.Text('JP JEANS', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
+                  pw.Text('TICKET DE CAMBIO', style: const pw.TextStyle(fontSize: 10)),
+                  pw.SizedBox(height: 5),
+                  pw.Text('Fecha: $fechaHora', style: const pw.TextStyle(fontSize: 8)),
+                  pw.Divider(borderStyle: pw.BorderStyle.dashed),
+                  
+                  pw.Text('[ ENTRA AL STOCK ]', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+                  ..._articulosEntran.map((item) => pw.Text('${item['sku']} - ${item['nombre']} [Talla: ${item['talla_seleccionada']}]', style: const pw.TextStyle(fontSize: 8))),
+                  
+                  pw.SizedBox(height: 10),
+                  pw.Text('[ SALE AL CLIENTE ]', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+                  ..._articulosSalen.map((item) => pw.Text('${item['sku']} - ${item['nombre']} [Talla: ${item['talla_seleccionada']}]', style: const pw.TextStyle(fontSize: 8))),
+                  
+                  pw.Divider(borderStyle: pw.BorderStyle.dashed),
+                  pw.Text('MOTIVO DEL CAMBIO:', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                  pw.Text(_motivoController.text.trim(), style: const pw.TextStyle(fontSize: 8)),
+                  pw.SizedBox(height: 10),
+                ]
+              );
+            }
+          )
+        );
+        
+        await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => doc.save(), name: 'Cambio_JPJeans');
+        if (!mounted) return;
+
+        // 🚨 Guarda en la memoria para que salga en el ticket del Corte de Caja
+        await _registrarCambioEnMemoria();
+
+        sm.showSnackBar(const SnackBar(content: Text('Cambio registrado en BD e impreso exitosamente.'), backgroundColor: Colors.green));
+        
+        setState(() { 
+            _articulosEntran.clear(); 
+            _articulosSalen.clear(); 
+            _motivoController.clear(); 
+        });
+      } else {
+        sm.showSnackBar(const SnackBar(content: Text('Error al procesar. Verifica que haya stock de la prenda que sale.'), backgroundColor: Colors.red));
+      }
     } catch(e) {
       if (!mounted) return;
-      sm.showSnackBar(const SnackBar(content: Text('Error al procesar el cambio'), backgroundColor: Colors.red));
+      sm.showSnackBar(const SnackBar(content: Text('Error al procesar el cambio de red.'), backgroundColor: Colors.red));
+    } finally {
+      if (mounted) setState(() => _procesando = false);
     }
   }
 
@@ -342,7 +356,15 @@ class _CambiosViewState extends State<CambiosView> {
               const SizedBox(height: 20),
               TextField(controller: _motivoController, decoration: const InputDecoration(labelText: 'Motivo del cambio (Ej. Talla incorrecta)', border: OutlineInputBorder(), filled: true, fillColor: Color(0xFFF9F9F9))),
               const SizedBox(height: 20),
-              SizedBox(width: double.infinity, height: 50, child: ElevatedButton.icon(style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white), icon: const Icon(Icons.print), onPressed: _procesarCambio, label: const Text('PROCESAR CAMBIO E IMPRIMIR', style: TextStyle(letterSpacing: 1.5, fontWeight: FontWeight.bold)))),
+              SizedBox(
+                width: double.infinity, height: 50, 
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white), 
+                  icon: _procesando ? const CircularProgressIndicator(color: Colors.white) : const Icon(Icons.print), 
+                  onPressed: _procesando ? null : _procesarCambio, 
+                  label: const Text('PROCESAR CAMBIO E IMPRIMIR', style: TextStyle(letterSpacing: 1.5, fontWeight: FontWeight.bold))
+                )
+              ),
               const SizedBox(height: 50),
             ],
           ),

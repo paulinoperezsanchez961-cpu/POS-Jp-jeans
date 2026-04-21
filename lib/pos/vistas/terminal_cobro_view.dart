@@ -89,33 +89,35 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     await prefs.setString('caja_carrito', jsonEncode(carrito));
   }
 
-  Future<void> _registrarVentaEnMemoria(List<Map<String, dynamic>> carritoVendido) async {
+  // 🚨 ACTUALIZACIÓN CRÍTICA: Guarda la venta en la memoria local 
+  // con el MISMO FORMATO EXACTO que necesita la Oficina para las tarjetas azules
+  Future<void> _registrarVentaEnMemoria(List<Map<String, dynamic>> carritoVendido, double totalTicket, String vendedor) async {
     final prefs = await SharedPreferences.getInstance();
     final String? detallesStr = prefs.getString('caja_ventas_detalles');
-    List<dynamic> detalles = [];
-    if (detallesStr != null) {
-      detalles = jsonDecode(detallesStr);
-    }
+    List<dynamic> detalles = detallesStr != null ? jsonDecode(detallesStr) : [];
     
+    String resumenEstructurado = "";
+    int piezasTotalesVenta = 0;
+
     for (var item in carritoVendido) {
-      bool found = false;
-      for (var d in detalles) {
-        if (d['sku'] == item['sku'] && d['talla'] == item['talla']) {
-          d['cantidad'] += item['cantidad'];
-          found = true;
-          break;
-        }
-      }
-      if (!found) {
-        detalles.add({
-          'sku': item['sku'],
-          'nombre': item['nombre'],
-          'talla': item['talla'],
-          'precio': item['precio'],
-          'cantidad': item['cantidad']
-        });
-      }
+      resumenEstructurado += "${item['cantidad']}x [SKU: ${item['sku']}] ${item['nombre']} (Talla: ${item['talla']}) a \$${item['precio']} c/u. ";
+      piezasTotalesVenta += (item['cantidad'] as int);
     }
+
+    if (vendedor.isNotEmpty) {
+      resumenEstructurado += "| Vendedor: $vendedor";
+    } else {
+      resumenEstructurado += "| Vendedor: Mostrador General";
+    }
+
+    detalles.add({
+      'sku': '', 
+      'nombre': resumenEstructurado, // El traductor visual leerá este bloque completo
+      'talla': '',
+      'precio': totalTicket, // Total completo del ticket
+      'cantidad': piezasTotalesVenta
+    });
+
     await prefs.setString('caja_ventas_detalles', jsonEncode(detalles));
   }
 
@@ -375,15 +377,17 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     
     setState(() => _procesandoCobro = true);
 
+    // Aplicar descuento por prenda en los precios que se enviarán
     List<Map<String, dynamic>> carritoAEnviar = carrito.map((item) {
       var mod = Map<String, dynamic>.from(item);
       mod['precio_venta'] = (mod['precio_venta'] - _descuentoPorPieza).clamp(0.0, double.infinity);
       if (mod['en_rebaja']) mod['precio_rebaja'] = (mod['precio_rebaja'] - _descuentoPorPieza).clamp(0.0, double.infinity);
+      mod['precio'] = (mod['precio'] - _descuentoPorPieza).clamp(0.0, double.infinity); // <-- Precio exacto ya cobrado
       return mod;
     }).toList();
 
     try {
-      // 🚨 AQUÍ INYECTAMOS EL CÓDIGO DE CREADOR PARA EL SERVIDOR
+      // 1. Enviar la venta al Cerebro (Sincroniza stock, tallas y radar en vivo)
       var res = await http.post(
         Uri.parse('${ApiService.baseUrl}/pos/vender'),
         headers: {"Content-Type": "application/json"},
@@ -395,23 +399,26 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
       );
       
       if (!mounted) return;
-      
       var data = jsonDecode(res.body);
 
       if (data['exito'] == true) {
-        final List<Map<String, dynamic>> carritoImpresion = List.from(carrito);
         final double totalImpresion = _total;
         final double pagoImpresion = pago;
         final double cambioImpresion = metodo == "Efectivo" ? _cambio : 0.0;
         final String descuentoTxt = _vendedorAsociado.isNotEmpty ? "Desc. ($_vendedorAsociado): -\$${_descuentoAplicado.toStringAsFixed(2)}" : "";
 
+        // 2. Registrar en la memoria local EXACTAMENTE lo que se cobró (Para el Corte de Caja)
+        await _registrarVentaEnMemoria(carritoAEnviar, totalImpresion, _vendedorAsociado);
+        
+        // 3. Aumentar el total de la caja del día
         widget.onVentaExitosa(_total);
-        _registrarVentaEnMemoria(carritoImpresion);
 
+        // 4. Limpiar pantalla
         setState(() { carrito.clear(); _pagoController.clear(); _cuponController.clear(); _vendedorAsociado = ""; _descuentoAplicado = 0.0; _descuentoPorPieza = 0.0; _cobroEfectivoModo = false; _recalcularTotal(); });
         _guardarCarritoMemoria(); 
         _cargarCatalogoDesdeCerebro(); 
 
+        // 5. Imprimir Ticket
         final doc = pw.Document();
         pw.MemoryImage? imageLogo;
         try { imageLogo = pw.MemoryImage((await rootBundle.load('assets/logo.png')).buffer.asUint8List()); } catch (e) { debugPrint('Aviso Logo: $e'); }
@@ -436,9 +443,9 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                   pw.Text('Método: $metodo', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
                   pw.Divider(borderStyle: pw.BorderStyle.dashed),
                   pw.ListView.builder(
-                    itemCount: carritoImpresion.length,
+                    itemCount: carritoAEnviar.length,
                     itemBuilder: (context, i) {
-                      final item = carritoImpresion[i];
+                      final item = carritoAEnviar[i];
                       return pw.Row(
                         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                         children: [
@@ -489,11 +496,11 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     }
   }
 
-  // 🚨 EL CORTE AHORA MANDA LOS DETALLES E IMPRIME EL DESGLOSE COMPLETO
+  // 🚨 EL CORTE AHORA MANDA LOS DETALLES ESTRUCTURADOS DE LA MEMORIA LOCAL
   Future<void> _imprimirCorteCaja() async {
     final prefs = await SharedPreferences.getInstance();
     
-    // 1. LEER VENTAS
+    // 1. LEER VENTAS DEL DÍA
     final String? detallesStr = prefs.getString('caja_ventas_detalles');
     List<dynamic> detalles = detallesStr != null ? jsonDecode(detallesStr) : [];
     int totalPiezas = 0;
@@ -507,6 +514,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     final String? cambiosStr = prefs.getString('caja_cambios_detalles');
     List<dynamic> cambios = cambiosStr != null ? jsonDecode(cambiosStr) : [];
 
+    // Paquete final del corte de caja que viaja a la Oficina
     Map<String, dynamic> detallesCorte = {
       "piezas": totalPiezas,
       "items": detalles,
@@ -541,18 +549,31 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
               pw.Text(fechaHora, style: const pw.TextStyle(fontSize: 8)),
               pw.Divider(borderStyle: pw.BorderStyle.dashed),
               
-              // 🚨 DESGLOSE DE PRODUCTOS VENDIDOS
+              // 🚨 DESGLOSE DE PRODUCTOS VENDIDOS PARA EL TICKET FÍSICO
               if (detalles.isNotEmpty) ...[
                 pw.SizedBox(height: 5),
-                pw.Text('PRENDAS VENDIDAS', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+                pw.Text('VENTAS DEL DÍA ($totalPiezas PZS)', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
                 pw.SizedBox(height: 5),
-                ...detalles.map((item) => pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Expanded(child: pw.Text('${item['cantidad']}x ${item['nombre']} [Talla: ${item['talla']}]', style: const pw.TextStyle(fontSize: 8))),
-                    pw.Text('\$${(item['precio'] * item['cantidad']).toStringAsFixed(2)}', style: const pw.TextStyle(fontSize: 8)),
-                  ]
-                )),
+                ...detalles.map((item) {
+                   String line = item['nombre'].toString();
+                   String itemsVendidos = line.split('| Vendedor:')[0];
+                   String vendedor = line.split('| Vendedor:').length > 1 ? line.split('| Vendedor:')[1] : '';
+
+                   return pw.Column(
+                     crossAxisAlignment: pw.CrossAxisAlignment.start,
+                     children: [
+                       pw.Text(itemsVendidos.replaceAll('c/u.', 'c/u\n'), style: const pw.TextStyle(fontSize: 8)),
+                       pw.Row(
+                         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                         children: [
+                           pw.Text('Vendedor: $vendedor', style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey600)),
+                           pw.Text('\$${(item['precio'] as num).toDouble().toStringAsFixed(2)}', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                         ]
+                       ),
+                       pw.SizedBox(height: 4),
+                     ]
+                   );
+                }),
                 pw.Divider(borderStyle: pw.BorderStyle.dashed),
               ],
 
@@ -604,7 +625,10 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     
     if (!mounted) return; 
 
+    // Al terminar, le avisamos a la app principal que ponga la caja en $0
     widget.onCerrarCaja();
+
+    // 🚨 Bordeamos la memoria local (La caja inicia vacía el siguiente turno)
     await prefs.remove('caja_ventas_detalles'); 
     await prefs.remove('caja_apartados_detalles'); 
     await prefs.remove('caja_cambios_detalles'); 

@@ -69,14 +69,14 @@ class _ApartadosViewState extends State<ApartadosView> {
     } catch(e) { debugPrint("Aviso: $e"); }
   }
 
-  Future<void> _registrarMovimientoApartado(String tipo, String cliente, double monto) async {
+  Future<void> _registrarMovimientoApartado(String tipo, String clienteConDetalle, double monto) async {
     final prefs = await SharedPreferences.getInstance();
     final String? apartadosStr = prefs.getString('caja_apartados_detalles');
     List<dynamic> apartados = apartadosStr != null ? jsonDecode(apartadosStr) : [];
     
     apartados.add({
       'tipo': tipo,
-      'cliente': cliente,
+      'cliente': clienteConDetalle,
       'monto': monto
     });
     
@@ -179,7 +179,7 @@ class _ApartadosViewState extends State<ApartadosView> {
       return;
     }
 
-    final sm = ScaffoldMessenger.of(context); // 🛡️ CAPTURAMOS PARA EVITAR WARNING
+    final sm = ScaffoldMessenger.of(context); 
 
     setState(() => _procesando = true);
 
@@ -206,7 +206,9 @@ class _ApartadosViewState extends State<ApartadosView> {
 
         widget.onVentaExitosa(enganche);
         
-        await _registrarMovimientoApartado('APARTADO', _clienteController.text, enganche);
+        // 🚨 AHORA SÍ: El resumen para el corte de caja incluye el [SKU: ...]
+        String resumenPrendas = _carritoApartado.map((item) => "${item['cantidad']}x [SKU: ${item['sku']}] ${item['nombre']}").join(", ");
+        await _registrarMovimientoApartado('NUEVO APARTADO', "${_clienteController.text} ($resumenPrendas)", enganche);
 
         setState(() {
           _carritoApartado.clear();
@@ -216,7 +218,7 @@ class _ApartadosViewState extends State<ApartadosView> {
         });
         
         await _cargarApartados();
-        sm.showSnackBar(const SnackBar(content: Text('Apartado creado con éxito'), backgroundColor: Colors.green)); // 🛡️ USAMOS VARIABLE SEGURA
+        sm.showSnackBar(const SnackBar(content: Text('Apartado creado con éxito'), backgroundColor: Colors.green)); 
       }
     } catch(e) { 
       debugPrint('Aviso al crear apartado: $e'); 
@@ -271,7 +273,7 @@ class _ApartadosViewState extends State<ApartadosView> {
                   Navigator.pop(contextDialog);
                   if (mounted) setState(() => _procesando = true);
                   
-                  final sm = ScaffoldMessenger.of(context); // 🛡️ CAPTURAMOS PARA EVITAR WARNING
+                  final sm = ScaffoldMessenger.of(context); 
 
                   try {
                     String url = esLiquidacion 
@@ -290,11 +292,13 @@ class _ApartadosViewState extends State<ApartadosView> {
                     List<Map<String, dynamic>> carritoRecuperado = itemsRecuperados.map((e) => Map<String,dynamic>.from(e)).toList();
                     
                     if (esLiquidacion) {
-                      await _registrarMovimientoApartado('LIQUIDACIÓN', apartado['cliente'], dineroParaCuenta);
+                      // 🚨 AHORA SÍ: El resumen para el corte de caja incluye el [SKU: ...] al liquidar
+                      String resumenPrendas = carritoRecuperado.map((item) => "${item['cantidad']}x [SKU: ${item['sku']}] ${item['nombre']}").join(", ");
+                      await _registrarMovimientoApartado('LIQUIDACIÓN', "${apartado['cliente']} ($resumenPrendas)", dineroParaCuenta);
                       await _imprimirTicketApartado("LIQUIDACIÓN DE APARTADO", apartado['cliente'], carritoRecuperado, totalOriginal, dineroParaCuenta, 0.0, cambio: cambio, pagoCliente: pago);
                       sm.showSnackBar(const SnackBar(content: Text('Cuenta liquidada. Ticket impreso.'), backgroundColor: Colors.green));
                     } else {
-                      await _registrarMovimientoApartado('ABONO', apartado['cliente'], dineroParaCuenta);
+                      await _registrarMovimientoApartado('ABONO', apartado['cliente'].toString(), dineroParaCuenta);
                       await _imprimirTicketApartado("ABONO A CUENTA", apartado['cliente'], carritoRecuperado, totalOriginal, pago, nuevaResta);
                       sm.showSnackBar(const SnackBar(content: Text('Abono registrado. Ticket impreso.'), backgroundColor: Colors.orange));
                     }
@@ -363,7 +367,7 @@ class _ApartadosViewState extends State<ApartadosView> {
   }
 
   void _devolverAStock(String idApartado) async {
-    final sm = ScaffoldMessenger.of(context); // 🛡️ CAPTURAMOS ANTES
+    final sm = ScaffoldMessenger.of(context); 
     bool? conf = await showDialog(
       context: context,
       builder: (contextDialog) => AlertDialog(
@@ -382,7 +386,7 @@ class _ApartadosViewState extends State<ApartadosView> {
         await http.post(Uri.parse('${ApiService.baseUrl}/pos/apartados/cancelar/$idApartado'));
         if (!mounted) return;
         await _cargarApartados();
-        sm.showSnackBar(const SnackBar(content: Text('Prendas devueltas al stock'), backgroundColor: Colors.green)); // 🛡️ SEGURO
+        sm.showSnackBar(const SnackBar(content: Text('Prendas devueltas al stock'), backgroundColor: Colors.green)); 
       } catch(e) { debugPrint('Aviso devolver stock: $e'); } finally { if (mounted) setState(() => _procesando = false); }
     }
   }
@@ -439,8 +443,8 @@ class _ApartadosViewState extends State<ApartadosView> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(apt['cliente'] ?? 'Cliente', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                          Text(apt['descripcion_prendas'] ?? 'Prendas varias', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                          Text(apt['cliente']?.toString() ?? 'Cliente', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                          Text(apt['descripcion_prendas']?.toString() ?? 'Prendas varias', style: const TextStyle(color: Colors.grey, fontSize: 12)),
                           const SizedBox(height: 8),
                           Text('Resta: \$${apt['resta']}', style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 14)),
                         ],
