@@ -23,10 +23,9 @@ class ApiService {
   }
 
   // ==========================================================
-  // 💼 CONTABILIDAD Y CORTES
+  // 💼 CONTABILIDAD Y CORTES (ACTUALIZADO TRANSFERENCIA)
   // ==========================================================
-  // 🚨 ACTUALIZADO: Envía las bolsas separadas (Efectivo y Tarjeta) al Cerebro
-  static Future<bool> guardarCorteCaja(String cajero, double ventasEfectivo, double ventasTarjeta, double gastosTotales, {Map<String, dynamic>? detalles}) async {
+  static Future<bool> guardarCorteCaja(String cajero, double ventasEfectivo, double ventasTarjeta, double ventasTransferencia, double gastosTotales, {Map<String, dynamic>? detalles}) async {
     try {
       final res = await http.post(
         Uri.parse('$baseUrl/pos/corte-caja'), 
@@ -35,6 +34,7 @@ class ApiService {
           "cajero": cajero, 
           "ventas_efectivo": ventasEfectivo, 
           "ventas_tarjeta": ventasTarjeta, 
+          "ventas_transferencia": ventasTransferencia,
           "gastos_totales": gastosTotales,
           "detalles": detalles ?? {} 
         })
@@ -51,7 +51,6 @@ class ApiService {
     } catch (e) { return []; }
   }
 
-  // 🚨 ACTUALIZADO: Ahora recibe rango de fechas para el Radar (Filtros de semana)
   static Future<List<dynamic>> obtenerVentasEnVivo({String? fechaInicio, String? fechaFin}) async {
     try {
       String urlStr = '$baseUrl/oficina/ventas-en-vivo';
@@ -139,6 +138,21 @@ class ApiService {
   // ==========================================================
   // 👥 VENDEDORES Y CUPONES
   // ==========================================================
+  static Future<bool> liquidarComisiones(String codigo, int piezas, double ventasTotales) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/oficina/vendedores/pagar'),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({
+          "codigo_creador": codigo,
+          "piezas": piezas,
+          "ventas_totales": ventasTotales,
+        })
+      );
+      return res.statusCode == 200;
+    } catch (e) { return false; }
+  }
+
   static Future<List<dynamic>> obtenerVendedores() async {
     try {
       final res = await http.get(Uri.parse('$baseUrl/oficina/vendedores'));

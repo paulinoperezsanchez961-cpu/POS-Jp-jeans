@@ -13,7 +13,7 @@ class _VentasEnVivoViewState extends State<VentasEnVivoView> {
   List<dynamic> _ventasVisibles = [];
   bool _cargando = true;
   Timer? _timer;
-  String _filtroActivo = 'Hoy'; // Opciones: 'Hoy' o 'Esta Semana'
+  String _filtroActivo = 'Hoy'; 
 
   @override
   void initState() {
@@ -31,7 +31,6 @@ class _VentasEnVivoViewState extends State<VentasEnVivoView> {
     super.dispose();
   }
 
-  // 🚨 TRADUCTOR DE FECHAS PARA MYSQL (YYYY-MM-DD)
   String _formatearFechaBD(DateTime fecha) {
     return '${fecha.year}-${fecha.month.toString().padLeft(2, '0')}-${fecha.day.toString().padLeft(2, '0')}';
   }
@@ -44,15 +43,12 @@ class _VentasEnVivoViewState extends State<VentasEnVivoView> {
     String? fechaFin;
 
     if (_filtroActivo == 'Esta Semana') {
-      // Magia: En Dart el Domingo es el día 7. 
-      // Calculamos el último domingo para que sea el inicio de la semana.
       int diasRestar = hoy.weekday == 7 ? 0 : hoy.weekday;
       DateTime ultimoDomingo = hoy.subtract(Duration(days: diasRestar));
       
       fechaInicio = _formatearFechaBD(ultimoDomingo);
       fechaFin = _formatearFechaBD(hoy);
     } else {
-      // 'Hoy'
       fechaInicio = _formatearFechaBD(hoy);
       fechaFin = _formatearFechaBD(hoy);
     }
@@ -71,10 +67,24 @@ class _VentasEnVivoViewState extends State<VentasEnVivoView> {
   Widget build(BuildContext context) {
     bool isMobile = MediaQuery.of(context).size.width < 800;
 
-    // Calcular el total vendido en el periodo filtrado
+    // 🚨 CÁLCULO FINANCIERO RIGUROSO EN VIVO
     double totalPeriodo = 0;
+    double totalEfectivo = 0;
+    double totalTarjeta = 0;
+    double totalTransferencia = 0;
+
     for (var v in _ventasVisibles) {
-      totalPeriodo += double.tryParse(v['monto'].toString()) ?? 0;
+      double monto = double.tryParse(v['monto'].toString()) ?? 0;
+      String metodo = v['metodo_pago'] ?? 'Efectivo';
+
+      totalPeriodo += monto;
+      if (metodo.contains('Tarjeta')) {
+        totalTarjeta += monto;
+      } else if (metodo.contains('Transferencia')) {
+        totalTransferencia += monto;
+      } else {
+        totalEfectivo += monto;
+      }
     }
 
     return Scaffold(
@@ -101,7 +111,6 @@ class _VentasEnVivoViewState extends State<VentasEnVivoView> {
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // 🚨 NUEVO FILTRO DE DÍAS Y SEMANAS
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.black12)),
@@ -128,20 +137,87 @@ class _VentasEnVivoViewState extends State<VentasEnVivoView> {
             ),
             const SizedBox(height: 20),
             
-            // 🚨 TARJETA DE TOTAL ACUMULADO
+            // 🚨 DASHBOARD FINANCIERO EN VIVO (4 COLUMNAS)
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.green.shade50,
+                color: Colors.grey.shade50,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.green.shade200)
+                border: Border.all(color: Colors.black12)
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(_filtroActivo == 'Hoy' ? 'INGRESO BRUTO HOY:' : 'INGRESO BRUTO SEMANAL:', style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold, letterSpacing: 1)),
-                  Text('\$${totalPeriodo.toStringAsFixed(2)}', style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: Colors.green)),
+                  Text(_filtroActivo == 'Hoy' ? 'CAJA ACTUAL (HOY)' : 'CAJA ACUMULADA (SEMANA)', style: const TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1, color: Colors.black54)),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.black12)),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('TOTAL BRUTO', style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
+                              const SizedBox(height: 4),
+                              FittedBox(fit: BoxFit.scaleDown, child: Text('\$${totalPeriodo.toStringAsFixed(2)}', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: Colors.black))),
+                            ],
+                          ),
+                        )
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        flex: 2,
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.green.shade200)),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('EFECTIVO', style: TextStyle(fontSize: 10, color: Colors.green, fontWeight: FontWeight.bold)),
+                              const SizedBox(height: 4),
+                              FittedBox(fit: BoxFit.scaleDown, child: Text('\$${totalEfectivo.toStringAsFixed(2)}', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.green.shade800))),
+                            ],
+                          ),
+                        )
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        flex: 2,
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.blue.shade200)),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('TARJETA MP', style: TextStyle(fontSize: 10, color: Colors.blue, fontWeight: FontWeight.bold)),
+                              const SizedBox(height: 4),
+                              FittedBox(fit: BoxFit.scaleDown, child: Text('\$${totalTarjeta.toStringAsFixed(2)}', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.blue.shade800))),
+                            ],
+                          ),
+                        )
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        flex: 2,
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(color: Colors.purple.shade50, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.purple.shade200)),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('TRANSF.', style: TextStyle(fontSize: 10, color: Colors.purple, fontWeight: FontWeight.bold)),
+                              const SizedBox(height: 4),
+                              FittedBox(fit: BoxFit.scaleDown, child: Text('\$${totalTransferencia.toStringAsFixed(2)}', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.purple.shade800))),
+                            ],
+                          ),
+                        )
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -163,7 +239,6 @@ class _VentasEnVivoViewState extends State<VentasEnVivoView> {
                         final String fecha = v['fecha_fmt'] ?? '';
                         final String metodoPago = v['metodo_pago'] ?? 'Efectivo';
 
-                        // 🚨 Lógica para poner el encabezado de fecha si cambió respecto al anterior
                         bool mostrarFecha = false;
                         if (index == 0) {
                           mostrarFecha = true;
@@ -172,13 +247,44 @@ class _VentasEnVivoViewState extends State<VentasEnVivoView> {
                           if (fecha != fechaAnterior) mostrarFecha = true;
                         }
 
-                        // Asignamos colores visuales por tipo de movimiento
-                        Color colorIcono = Colors.blue;
-                        IconData icono = Icons.shopping_bag;
-                        if (tipo == 'VENTA_POS') { colorIcono = Colors.green; icono = Icons.point_of_sale; }
-                        else if (tipo.contains('APARTADO')) { colorIcono = Colors.orange; icono = Icons.bookmark; }
+                        // 🚨 SEMÁFORO VISUAL POR TIPO DE MOVIMIENTO
+                        Color colorIcono = Colors.grey;
+                        IconData icono = Icons.info;
                         
+                        if (tipo == 'VENTA_POS') { 
+                          colorIcono = Colors.green; 
+                          icono = Icons.point_of_sale; 
+                        } else if (tipo == 'LIQUIDACION_APARTADO') { 
+                          colorIcono = Colors.red; // LIQUIDADO = ROJO
+                          icono = Icons.task_alt; 
+                        } else if (tipo == 'ABONO_APARTADO') { 
+                          colorIcono = Colors.green.shade700; // ABONO = VERDE
+                          icono = Icons.payments; 
+                        } else if (tipo == 'ENGANCHE_APARTADO') { 
+                          colorIcono = Colors.amber.shade700; // NUEVO APARTADO = AMARILLO/ÁMBAR
+                          icono = Icons.bookmark; 
+                        } else if (tipo == 'CAMBIO_FISICO') { 
+                          colorIcono = Colors.purple; 
+                          icono = Icons.swap_horiz; 
+                        }
+                        
+                        // 🚨 COLORES PARA ETIQUETAS DE MÉTODO DE PAGO
                         bool esTarjeta = metodoPago.contains('Tarjeta');
+                        bool esTransf = metodoPago.contains('Transferencia');
+                        
+                        Color colorMetodo = Colors.green.shade700;
+                        Color bgMetodo = Colors.green.shade50;
+                        IconData iconMetodo = Icons.money;
+
+                        if (esTarjeta) {
+                          colorMetodo = Colors.blue.shade700;
+                          bgMetodo = Colors.blue.shade50;
+                          iconMetodo = Icons.credit_card;
+                        } else if (esTransf) {
+                          colorMetodo = Colors.purple.shade700;
+                          bgMetodo = Colors.purple.shade50;
+                          iconMetodo = Icons.account_balance;
+                        }
 
                         Widget tarjetaVenta = Padding(
                           padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 8.0),
@@ -202,20 +308,20 @@ class _VentasEnVivoViewState extends State<VentasEnVivoView> {
                                       children: [
                                         Text(tipo.replaceAll('_', ' '), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10, color: colorIcono)),
                                         Text('⌚ $hora', style: const TextStyle(color: Colors.grey, fontSize: 10, fontWeight: FontWeight.bold)),
-                                        // 🚨 ETIQUETA DEL MÉTODO DE PAGO
+                                        // ETIQUETA DEL MÉTODO DE PAGO MEJORADA
                                         Container(
                                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                           decoration: BoxDecoration(
-                                            color: esTarjeta ? Colors.blue.shade50 : Colors.green.shade50,
-                                            border: Border.all(color: esTarjeta ? Colors.blue.shade200 : Colors.green.shade200),
+                                            color: bgMetodo,
+                                            border: Border.all(color: colorMetodo.withValues(alpha: 0.5)),
                                             borderRadius: BorderRadius.circular(4)
                                           ),
                                           child: Row(
                                             mainAxisSize: MainAxisSize.min,
                                             children: [
-                                              Icon(esTarjeta ? Icons.credit_card : Icons.money, size: 10, color: esTarjeta ? Colors.blue.shade700 : Colors.green.shade700),
+                                              Icon(iconMetodo, size: 10, color: colorMetodo),
                                               const SizedBox(width: 4),
-                                              Text(metodoPago, style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: esTarjeta ? Colors.blue.shade700 : Colors.green.shade700)),
+                                              Text(metodoPago, style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: colorMetodo)),
                                             ],
                                           ),
                                         )
@@ -232,7 +338,6 @@ class _VentasEnVivoViewState extends State<VentasEnVivoView> {
                           ),
                         );
 
-                        // Si es el primer elemento de un día, dibuja la cabecera gris de fecha
                         if (mostrarFecha) {
                           return Column(
                             crossAxisAlignment: CrossAxisAlignment.start,

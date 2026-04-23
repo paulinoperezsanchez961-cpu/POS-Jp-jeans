@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
-import 'dart:convert'; // 🚨 IMPORTANTE PARA EL CLONADOR DINÁMICO
+import 'dart:convert'; 
 import 'package:image_picker/image_picker.dart';
 import 'package:printing/printing.dart';
 import 'package:pdf/pdf.dart';
@@ -8,7 +8,6 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 
-// 🚨 IMPORTACIONES RELATIVAS 
 import '../../services/api_service.dart';
 import '../utils/escaner_utils.dart';
 
@@ -100,26 +99,27 @@ class _InventarioStockViewState extends State<InventarioStockView> {
       final XFile? image = await _picker.pickImage(source: source, imageQuality: 80);
       if (image == null || !mounted) return;
 
-      final sm = ScaffoldMessenger.of(context);
-      sm.showSnackBar(const SnackBar(content: Text('Subiendo nueva foto...'), duration: Duration(seconds: 1)));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Subiendo nueva foto...'), duration: Duration(seconds: 1)));
 
       final bytes = await image.readAsBytes();
       var request = http.MultipartRequest('POST', Uri.parse('${ApiService.baseUrl}/pos/actualizar-foto/$idProducto'));
       request.files.add(http.MultipartFile.fromBytes('foto', bytes, filename: image.name, contentType: MediaType('image', image.name.split('.').last)));
       
       var response = await http.Response.fromStream(await request.send());
+      
+      // 🚨 Guardia de seguridad antes del contexto
       if (!mounted) return;
 
       if (response.statusCode == 200) {
         _cargarDatos();
-        sm.showSnackBar(const SnackBar(content: Text('Foto actualizada exitosamente'), backgroundColor: Colors.green));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Foto actualizada exitosamente'), backgroundColor: Colors.green));
       } else {
-        sm.showSnackBar(const SnackBar(content: Text('Error al guardar en el servidor'), backgroundColor: Colors.red));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error al guardar en el servidor'), backgroundColor: Colors.red));
       }
     } catch (e) { debugPrint('Aviso foto: $e'); }
   }
 
-  void _solicitarClaveParaResurtir(Map<String, dynamic> prod) {
+  void _solicitarClaveParaEliminar(Map<String, dynamic> prod) {
     TextEditingController claveController = TextEditingController();
     bool verificando = false;
 
@@ -130,12 +130,12 @@ class _InventarioStockViewState extends State<InventarioStockView> {
         return StatefulBuilder(
           builder: (contextBuilder, setStateDialog) {
             return AlertDialog(
-              title: const Row(children: [Icon(Icons.security, color: Colors.red), SizedBox(width: 10), Text('Autorización Requerida', style: TextStyle(color: Colors.red))]),
+              title: Row(children: const [Icon(Icons.warning, color: Colors.red), SizedBox(width: 10), Text('Eliminar Producto', style: TextStyle(color: Colors.red))]),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Ingresa la contraseña de Administrador para resurtir mercancía.', style: TextStyle(fontSize: 12)),
+                  Text('Se eliminará por completo "${prod['nombre']}" del sistema. Requiere contraseña de Administrador.', style: const TextStyle(fontSize: 12)),
                   const SizedBox(height: 16),
                   TextField(
                     controller: claveController,
@@ -148,26 +148,37 @@ class _InventarioStockViewState extends State<InventarioStockView> {
               actions: [
                 TextButton(onPressed: () => Navigator.pop(contextDialog), child: const Text('Cancelar', style: TextStyle(color: Colors.grey))),
                 ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white),
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
                   onPressed: verificando ? null : () async {
                     if (claveController.text.trim().isEmpty) return;
                     setStateDialog(() => verificando = true);
                     
                     bool autorizado = await ApiService.verificarClaveAdmin(claveController.text.trim());
                     
-                    // 🛡️ GUARDIA DOBLE SEGURA
+                    // 🚨 Primera guardia antes de cambiar estado del diálogo
                     if (!mounted || !contextDialog.mounted) return;
                     
                     setStateDialog(() => verificando = false);
 
                     if (autorizado) {
                       Navigator.pop(contextDialog); 
-                      _abrirGestorResurtido(prod); 
+                      
+                      bool exito = await ApiService.eliminarProducto(prod['id']);
+                      
+                      // 🚨 Segunda guardia antes de mostrar mensaje principal
+                      if (!mounted) return;
+                      
+                      if (exito) {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('✅ Producto eliminado'), backgroundColor: Colors.green));
+                        _cargarDatos();
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('❌ Error al eliminar'), backgroundColor: Colors.red));
+                      }
                     } else {
                       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('❌ Contraseña Incorrecta'), backgroundColor: Colors.red));
                     }
                   },
-                  child: verificando ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Text('VERIFICAR'),
+                  child: verificando ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Text('ELIMINAR'),
                 )
               ]
             );
@@ -178,7 +189,6 @@ class _InventarioStockViewState extends State<InventarioStockView> {
   }
 
   void _abrirGestorResurtido(Map<String, dynamic> prod) {
-    // 🚨 CLONADOR DINÁMICO: Extraemos y volvemos a construir la lista para evitar bloqueos de solo lectura
     List<Map<String, dynamic>> tallasEnEdicion = [];
     try {
       var raw = prod['tallas'];
@@ -227,12 +237,10 @@ class _InventarioStockViewState extends State<InventarioStockView> {
                               int c = int.tryParse(nuevaCantCtrl.text) ?? 0;
                               if (t.isNotEmpty && c > 0) {
                                 setStateDialog(() {
-                                  // 🚨 Buscamos si la talla ya existe
                                   int idx = tallasEnEdicion.indexWhere((element) => element['talla'] == t);
                                   if (idx != -1) { 
                                     tallasEnEdicion[idx]['cantidad'] = (tallasEnEdicion[idx]['cantidad'] as int) + c; 
                                   } else { 
-                                    // 🚨 Si NO existe, la inyectamos como nueva
                                     tallasEnEdicion.add({'talla': t, 'cantidad': c}); 
                                   }
                                   
@@ -291,21 +299,25 @@ class _InventarioStockViewState extends State<InventarioStockView> {
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white),
                   onPressed: () async {
-                    final nav = Navigator.of(contextDialog);
-                    final sm = ScaffoldMessenger.of(context);
                     
                     bool exito = await ApiService.resurtirProducto(prod['id'], tallasEnEdicion, stockTotalCalculado);
-                    nav.pop(); 
+                    
+                    // 🚨 Guardia antes de cerrar el diálogo
+                    if (!contextDialog.mounted) return;
+                    Navigator.pop(contextDialog); 
+                    
+                    // 🚨 Guardia antes de mostrar la barra principal
+                    if (!mounted) return;
                     
                     if (exito) {
-                      sm.showSnackBar(const SnackBar(content: Text('Stock actualizado.'), backgroundColor: Colors.green));
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Stock actualizado.'), backgroundColor: Colors.green));
                       _cargarDatos(); 
                       
                       if (tallasAgregadasParaImprimir.isNotEmpty) {
                         _imprimirEtiquetasNuevas(prod, tallasAgregadasParaImprimir);
                       }
                     } else {
-                      sm.showSnackBar(const SnackBar(content: Text('Error al resurtir producto.'), backgroundColor: Colors.red));
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error al resurtir producto.'), backgroundColor: Colors.red));
                     }
                   },
                   child: const Text('GUARDAR E IMPRIMIR NUEVAS')
@@ -319,7 +331,6 @@ class _InventarioStockViewState extends State<InventarioStockView> {
   }
 
   Future<void> _imprimirEtiquetasNuevas(Map<String, dynamic> prod, List<Map<String, dynamic>> tallasNuevas) async {
-    final sm = ScaffoldMessenger.of(context);
     String corteLote = prod['sku'];
     String nombreModelo = prod['nombre'] ?? '';
     double precioProducto = double.tryParse(prod['precio_venta']?.toString() ?? '0') ?? 0.0;
@@ -328,7 +339,7 @@ class _InventarioStockViewState extends State<InventarioStockView> {
     if (totalEtiquetas == 0) return;
 
     try {
-      sm.showSnackBar(SnackBar(content: Text('Enviando $totalEtiquetas nuevas etiquetas...'), duration: const Duration(seconds: 2)));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Enviando $totalEtiquetas nuevas etiquetas...'), duration: const Duration(seconds: 2)));
       
       final doc = pw.Document();
       final formatNuevo = const PdfPageFormat(51.5 * PdfPageFormat.mm, 25.4 * PdfPageFormat.mm, marginAll: 0);
@@ -369,15 +380,14 @@ class _InventarioStockViewState extends State<InventarioStockView> {
       }
       await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => doc.save(), name: 'Resurtido_$corteLote');
       if (!mounted) return;
-      sm.showSnackBar(const SnackBar(content: Text('Impresión completada'), backgroundColor: Colors.green));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Impresión completada'), backgroundColor: Colors.green));
     } catch (e) {
       if (!mounted) return;
-      sm.showSnackBar(SnackBar(content: Text('Error al imprimir: $e'), backgroundColor: Colors.red));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error al imprimir: $e'), backgroundColor: Colors.red));
     }
   }
 
   Future<void> _reimprimirEtiquetas(Map<String, dynamic> prod) async {
-    final sm = ScaffoldMessenger.of(context);
     String corteLote = prod['sku'];
     String nombreModelo = prod['nombre'] ?? '';
     double precioProducto = double.tryParse(prod['precio_venta']?.toString() ?? '0') ?? 0.0;
@@ -385,12 +395,12 @@ class _InventarioStockViewState extends State<InventarioStockView> {
 
     int totalEtiquetas = tallasBD.fold(0, (sum, item) => sum + (item['cantidad'] as int));
     if (totalEtiquetas == 0) {
-       sm.showSnackBar(const SnackBar(content: Text('Este producto tiene 0 piezas en inventario.'), backgroundColor: Colors.orange));
+       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Este producto tiene 0 piezas en inventario.'), backgroundColor: Colors.orange));
        return;
     }
 
     try {
-      sm.showSnackBar(SnackBar(content: Text('Generando $totalEtiquetas etiquetas...'), duration: const Duration(seconds: 1)));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Generando $totalEtiquetas etiquetas...'), duration: const Duration(seconds: 1)));
       final doc = pw.Document();
       final formatNuevo = const PdfPageFormat(51.5 * PdfPageFormat.mm, 25.4 * PdfPageFormat.mm, marginAll: 0);
 
@@ -430,10 +440,10 @@ class _InventarioStockViewState extends State<InventarioStockView> {
       }
       await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => doc.save(), name: 'Reimpresion_$corteLote');
       if (!mounted) return;
-      sm.showSnackBar(const SnackBar(content: Text('Impresión enviada'), backgroundColor: Colors.green));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Impresión enviada'), backgroundColor: Colors.green));
     } catch (e) {
       if (!mounted) return;
-      sm.showSnackBar(SnackBar(content: Text('Error al imprimir: $e'), backgroundColor: Colors.red));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error al imprimir: $e'), backgroundColor: Colors.red));
     }
   }
 
@@ -556,13 +566,19 @@ class _InventarioStockViewState extends State<InventarioStockView> {
                                       OutlinedButton.icon(
                                         style: OutlinedButton.styleFrom(foregroundColor: Colors.green, side: const BorderSide(color: Colors.green), padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0)),
                                         icon: const Icon(Icons.add_box, size: 14), label: const Text('RESURTIR', style: TextStyle(fontSize: 10)),
-                                        onPressed: () => _solicitarClaveParaResurtir(prod),
+                                        onPressed: () => _abrirGestorResurtido(prod),
                                       ),
                                       const SizedBox(height: 5),
                                       OutlinedButton.icon(
                                         style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0)),
                                         icon: const Icon(Icons.camera_alt, size: 14), label: const Text('CAMBIAR FOTO', style: TextStyle(fontSize: 10)),
                                         onPressed: () => _actualizarFotoProducto(prod['id']),
+                                      ),
+                                      const SizedBox(height: 5),
+                                      OutlinedButton.icon(
+                                        style: OutlinedButton.styleFrom(foregroundColor: Colors.red, side: const BorderSide(color: Colors.red), padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0)),
+                                        icon: const Icon(Icons.delete, size: 14), label: const Text('ELIMINAR', style: TextStyle(fontSize: 10)),
+                                        onPressed: () => _solicitarClaveParaEliminar(prod),
                                       )
                                     ],
                                   )

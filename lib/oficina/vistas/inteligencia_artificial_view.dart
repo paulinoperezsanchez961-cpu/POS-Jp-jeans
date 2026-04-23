@@ -15,7 +15,7 @@ class _InteligenciaArtificialViewState extends State<InteligenciaArtificialView>
 
   final List<Map<String, dynamic>> _mensajes = [
     {
-      "texto": "Hola Jefe. Soy la IA Ejecutiva de JP Jeans. Ahora estoy conectada directamente a tus bases de datos. Pregúntame sobre tus ventas de la semana, stock o gastos y te daré respuestas 100% exactas.", 
+      "texto": "Hola Jefe. Soy la IA Ejecutiva de JP Jeans. He sido actualizada con Visión Total.\n\nAhora leo en tiempo real tu inventario completo (con SKUs y tallas), los cortes de caja y cada venta que entra en el día. Pregúntame lo que quieras.", 
       "esUsuario": false
     }
   ];
@@ -32,39 +32,66 @@ class _InteligenciaArtificialViewState extends State<InteligenciaArtificialView>
     });
   }
 
-  DateTime? _parsearFecha(String fechaFormateada) {
+  // 🚨 EL NUEVO CEREBRO: Extrae toda la base de datos y se la pasa a la IA de forma estructurada
+  Future<String> _armarContextoProfundo() async {
     try {
-      var partes = fechaFormateada.split(' - ')[0].split('/');
-      return DateTime(int.parse(partes[2]), int.parse(partes[1]), int.parse(partes[0]));
-    } catch(e) { return null; }
-  }
+      // Descargamos todo al mismo tiempo para que sea ultra rápido
+      final resultados = await Future.wait([
+        ApiService.obtenerInventario(),
+        ApiService.obtenerVentasEnVivo(), // Por defecto trae las de HOY
+        ApiService.obtenerHistorialCortes()
+      ]);
 
-  Future<String> _armarContextoReal() async {
-    try {
-      final cortes = await ApiService.obtenerHistorialCortes();
-      final inventario = await ApiService.obtenerInventario();
+      final List<dynamic> inventario = resultados[0];
+      final List<dynamic> ventasHoy = resultados[1];
+      final List<dynamic> cortes = resultados[2];
+
+      StringBuffer ctx = StringBuffer();
       
-      double ventasSemana = 0;
-      double gastosSemana = 0;
-      int stockTotal = 0;
-      DateTime hoy = DateTime.now();
-
-      for (var c in cortes) {
-        DateTime? f = _parsearFecha(c['fecha_formateada'] ?? '');
-        if (f != null && hoy.difference(f).inDays <= 7) {
-          ventasSemana += double.tryParse(c['ventas_totales'].toString()) ?? 0;
-          gastosSemana += double.tryParse(c['gastos_totales'].toString()) ?? 0;
+      // Instrucciones directas de sistema para la IA
+      ctx.writeln("INSTRUCCIÓN CRÍTICA PARA LA IA: A continuación se te entrega un volcado en tiempo real de la base de datos. DEBES basar tus respuestas estrictamente en esta información. Si el dueño te pregunta por ventas de hoy, analiza los 'MOVIMIENTOS DE HOY'. Si pregunta por prendas, vestidos, pantalones, o stock, busca en el 'INVENTARIO ACTUAL' y dale la cantidad exacta, nombre y SKU.\n");
+      
+      // 1. INYECTAR INVENTARIO DETALLADO
+      ctx.writeln("--- INVENTARIO ACTUAL ---");
+      if (inventario.isEmpty) {
+        ctx.writeln("No hay productos en bodega en este momento.");
+      } else {
+        for (var p in inventario) {
+          // Inyectamos SKU, nombre, categoría, stock general y el JSON de las tallas
+          ctx.writeln("- SKU: ${p['sku']} | Nombre: ${p['nombre']} | Categoría: ${p['categoria'] ?? 'Sin categoría'} | Stock Total: ${p['stock_bodega']} | Tallas y piezas: ${p['tallas']} | Precio: \$${p['precio_venta']}");
         }
       }
-      
-      for (var p in inventario) {
-        stockTotal += int.tryParse(p['stock_bodega'].toString()) ?? 0;
+
+      // 2. INYECTAR VENTAS DE HOY
+      ctx.writeln("\n--- MOVIMIENTOS Y VENTAS DE HOY ---");
+      if (ventasHoy.isEmpty) {
+        ctx.writeln("No se han registrado ventas ni apartados el día de hoy.");
+      } else {
+        double totalHoy = 0.0;
+        for (var v in ventasHoy) {
+          ctx.writeln("- [${v['hora_fmt']}] TIPO: ${v['tipo']} | MONTO: \$${v['monto']} (Pagado en: ${v['metodo_pago'] ?? 'Efectivo'}) | DETALLE: ${v['descripcion']}");
+          totalHoy += double.tryParse(v['monto'].toString()) ?? 0.0;
+        }
+        ctx.writeln(">> TOTAL DE DINERO QUE HA ENTRADO HOY: \$${totalHoy.toStringAsFixed(2)}");
       }
 
-      // 🚨 SINTAXIS PERFECTA DART 
-      return "DATOS REALES DEL NEGOCIO (NO INVENTES NADA, BASATE SOLO EN ESTO): En los últimos 7 días hemos vendido \$${ventasSemana.toStringAsFixed(2)} y gastado en caja \$${gastosSemana.toStringAsFixed(2)}. Tenemos $stockTotal pantalones en bodega en total. \n\n PREGUNTA DEL DUEÑO: ";
+      // 3. INYECTAR ÚLTIMOS CORTES
+      ctx.writeln("\n--- ÚLTIMOS 3 CORTES DE CAJA ---");
+      if (cortes.isEmpty) {
+        ctx.writeln("Aún no hay cortes de caja en el historial.");
+      } else {
+        int limite = cortes.length > 3 ? 3 : cortes.length;
+        for (int i = 0; i < limite; i++) {
+          var c = cortes[i];
+          ctx.writeln("- Fecha: ${c['fecha_formateada']} | Cajero: ${c['cajero']} | Ventas Totales: \$${c['ventas_totales']} (Efectivo: \$${c['ventas_efectivo']}, Tarjeta: \$${c['ventas_tarjeta']}) | Gastos: \$${c['gastos_totales']}");
+        }
+      }
+
+      ctx.writeln("\n=========================");
+      ctx.writeln("CONSULTA EXACTA DEL DUEÑO:");
+      return ctx.toString();
     } catch (e) {
-      return "PREGUNTA DEL DUEÑO: ";
+      return "Hubo un pequeño error de red al recolectar el volcado de datos. Usa tu conocimiento anterior. CONSULTA DEL DUEÑO: ";
     }
   }
 
@@ -79,9 +106,11 @@ class _InteligenciaArtificialViewState extends State<InteligenciaArtificialView>
     _mensajeController.clear();
     _hacerScrollAlFondo();
 
-    String contextoReal = await _armarContextoReal();
-    String preguntaConContexto = contextoReal + preguntaVisual;
+    // Ahora armamos el contexto profundo antes de preguntar
+    String contextoGigante = await _armarContextoProfundo();
+    String preguntaConContexto = contextoGigante + preguntaVisual;
 
+    // Se manda el paquete completo a Gemini
     final String respuesta = await ApiService.preguntarALaIA(preguntaConContexto);
 
     if (!mounted) return; 
@@ -111,7 +140,7 @@ class _InteligenciaArtificialViewState extends State<InteligenciaArtificialView>
               ],
             ),
             const SizedBox(height: 8),
-            const Text('Copiloto inteligente conectado a tu BD.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+            const Text('Copiloto de Inteligencia de Negocios en Tiempo Real.', style: TextStyle(color: Colors.grey, fontSize: 12)),
             const SizedBox(height: 30),
             
             Expanded(
@@ -138,7 +167,7 @@ class _InteligenciaArtificialViewState extends State<InteligenciaArtificialView>
                           children: [
                             SizedBox(width: 15, height: 15, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.deepPurple)),
                             SizedBox(width: 10),
-                            Text("Analizando datos...", style: TextStyle(color: Colors.deepPurple, fontSize: 12)),
+                            Text("Extrayendo volcado de base de datos y analizando...", style: TextStyle(color: Colors.deepPurple, fontSize: 12, fontWeight: FontWeight.bold)),
                           ],
                         ),
                       ),
@@ -150,7 +179,7 @@ class _InteligenciaArtificialViewState extends State<InteligenciaArtificialView>
                           Expanded(
                             child: TextField(
                               controller: _mensajeController,
-                              decoration: const InputDecoration(hintText: 'Escribe tu pregunta...', border: OutlineInputBorder(), filled: true, fillColor: Color(0xFFF9F9F9)),
+                              decoration: const InputDecoration(hintText: 'Ej. ¿Cuántos vestidos tenemos y cuáles son sus SKUs?', border: OutlineInputBorder(), filled: true, fillColor: Color(0xFFF9F9F9)),
                               onSubmitted: (_) => _enviarMensaje(),
                             )
                           ),

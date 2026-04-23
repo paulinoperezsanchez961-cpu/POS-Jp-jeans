@@ -9,6 +9,7 @@ import 'vistas/apartados_view.dart';
 import 'vistas/boveda_qr_view.dart';
 import 'vistas/envios_web_view.dart';
 import 'vistas/inventario_stock_view.dart';
+import 'vistas/promotores_vendedores_view.dart'; // 🚨 NUEVA IMPORTACIÓN
 
 // ============================================================================
 // MÓDULO MAESTRO: PUNTO DE VENTA (POS)
@@ -57,7 +58,7 @@ class _ModuloPOSState extends State<ModuloPOS> {
     await prefs.remove('caja_carrito'); 
     await prefs.remove('caja_lista_gastos'); 
     
-    // 🚨 NUEVAS MEMORIAS: Limpiamos los historiales del Mega Ticket para el siguiente turno
+    // Memorias del Mega Ticket
     await prefs.remove('caja_ventas_detalles');
     await prefs.remove('caja_apartados_detalles');
     await prefs.remove('caja_cambios_detalles');
@@ -81,6 +82,7 @@ class _ModuloPOSState extends State<ModuloPOS> {
       BovedaQRView(onCerrar: () => _cambiarPestana(0)), 
       const EnviosWebView(),    
       const InventarioStockView(), 
+      const PromotoresVendedoresView(), // 🚨 NUEVA PANTALLA AGREGADA A LA LISTA
     ];
 
     return Scaffold(
@@ -103,6 +105,7 @@ class _ModuloPOSState extends State<ModuloPOS> {
           BottomNavigationBarItem(icon: Icon(Icons.qr_code_scanner_outlined, size: 20), label: 'QR'),
           BottomNavigationBarItem(icon: Icon(Icons.local_shipping_outlined, size: 20), label: 'ENVÍOS'),
           BottomNavigationBarItem(icon: Icon(Icons.inventory_2_outlined, size: 20), label: 'STOCK'),
+          BottomNavigationBarItem(icon: Icon(Icons.people_outline, size: 20), label: 'VENDEDORES'), // 🚨 NUEVO BOTÓN
         ],
       ) : null,
       body: Row(
@@ -123,6 +126,7 @@ class _ModuloPOSState extends State<ModuloPOS> {
               NavigationRailDestination(icon: Icon(Icons.qr_code_scanner_outlined), label: Text('BÓVEDA QR')),
               NavigationRailDestination(icon: Icon(Icons.local_shipping_outlined), label: Text('ENVÍOS WEB')),
               NavigationRailDestination(icon: Icon(Icons.inventory_2_outlined), label: Text('STOCK')),
+              NavigationRailDestination(icon: Icon(Icons.people_outline), label: Text('VENDEDORES')), // 🚨 NUEVO BOTÓN
             ],
           ),
           if (!isMobile) const VerticalDivider(thickness: 1, width: 1, color: Colors.black12),

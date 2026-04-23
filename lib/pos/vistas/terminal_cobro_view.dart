@@ -442,7 +442,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
   }
 
   Future<void> _ejecutarCobroEImprimirTicket({required String metodo}) async {
-    double pago = metodo == "Efectivo" ? (double.tryParse(_pagoController.text) ?? 0.0) : _total;
+    double pago = (metodo == "Efectivo") ? (double.tryParse(_pagoController.text) ?? 0.0) : _total;
     if (metodo == "Efectivo" && pago < _total) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Falta dinero para cubrir el total'), backgroundColor: Colors.orange));
       return;
@@ -556,10 +556,15 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                         pw.Text('CAMBIO', style: const pw.TextStyle(fontSize: 8)),
                         pw.Text('\$${cambioImpresion.toStringAsFixed(2)}', style: const pw.TextStyle(fontSize: 8))
                       ]),
+                    ] else if (metodo == "Transferencia") ...[
+                      pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
+                        pw.Text('PAGO APROBADO', style: const pw.TextStyle(fontSize: 8)),
+                        pw.Text('TRANSFERENCIA', style: const pw.TextStyle(fontSize: 8))
+                      ]),
                     ] else ...[
                       pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
                         pw.Text('PAGO APROBADO', style: const pw.TextStyle(fontSize: 8)),
-                        pw.Text('TARJETA', style: const pw.TextStyle(fontSize: 8))
+                        pw.Text('TARJETA MP', style: const pw.TextStyle(fontSize: 8))
                       ]),
                     ],
                     pw.Divider(borderStyle: pw.BorderStyle.dashed),
@@ -612,12 +617,15 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     int totalPiezas = 0;
     double calcEfectivo = 0.0;
     double calcTarjeta = 0.0;
+    double calcTransferencia = 0.0;
 
     for (var d in detalles) {
       totalPiezas += (d['cantidad'] as int);
       double monto = (d['precio'] as num).toDouble();
       if (d['metodo'] == 'Tarjeta MP') {
         calcTarjeta += monto;
+      } else if (d['metodo'] == 'Transferencia') {
+        calcTransferencia += monto;
       } else {
         calcEfectivo += monto;
       }
@@ -629,6 +637,8 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
       double monto = (a['monto'] as num).toDouble();
       if (a['metodo'] == 'Tarjeta MP') {
         calcTarjeta += monto;
+      } else if (a['metodo'] == 'Transferencia') {
+        calcTransferencia += monto;
       } else {
         calcEfectivo += monto;
       }
@@ -637,7 +647,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     final String? cambiosStr = prefs.getString('caja_cambios_detalles');
     List<dynamic> cambios = cambiosStr != null ? jsonDecode(cambiosStr) : [];
 
-    double calcVentasTotales = calcEfectivo + calcTarjeta;
+    double calcVentasTotales = calcEfectivo + calcTarjeta + calcTransferencia;
     double totalFisicoCaja = calcEfectivo - widget.gastosTotales;
 
     Map<String, dynamic> detallesCorte = {
@@ -647,7 +657,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
       "cambios": cambios
     };
 
-    await ApiService.guardarCorteCaja("Cajero Mostrador", calcEfectivo, calcTarjeta, widget.gastosTotales, detalles: detallesCorte);
+    await ApiService.guardarCorteCaja("Cajero Mostrador", calcEfectivo, calcTarjeta, calcTransferencia, widget.gastosTotales, detalles: detallesCorte);
     if (!mounted) {
       return;
     }
@@ -734,8 +744,12 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                 ]),
                 pw.SizedBox(height: 2),
                 pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
-                  pw.Text('  💳 En Tarjeta', style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey)),
+                  pw.Text('  💳 En Tarjeta (MP)', style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey)),
                   pw.Text('\$${calcTarjeta.toStringAsFixed(2)}', style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey))
+                ]),
+                pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
+                  pw.Text('  📱 En Transferencia', style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey)),
+                  pw.Text('\$${calcTransferencia.toStringAsFixed(2)}', style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey))
                 ]),
                 pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
                   pw.Text('  💵 En Efectivo', style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey)),
@@ -944,20 +958,28 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                       child: OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16), foregroundColor: Colors.black, side: const BorderSide(color: Colors.black)),
                     icon: const Icon(Icons.money),
-                    label: const Text('EFECTIVO', style: TextStyle(fontWeight: FontWeight.bold)),
+                    label: const Text('EFECTIVO', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
                     onPressed: () {
                       setState(() {
                         _cobroEfectivoModo = true;
                       });
                     },
                   )),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 8),
                   Expanded(
                       child: ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16), backgroundColor: Colors.blue, foregroundColor: Colors.white),
                     icon: const Icon(Icons.credit_card),
-                    label: const Text('MERCADO PAGO', style: TextStyle(fontWeight: FontWeight.bold)),
+                    label: const Text('TARJETA', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
                     onPressed: _iniciarCobroTerminalMP,
+                  )),
+                  const SizedBox(width: 8),
+                  Expanded(
+                      child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16), backgroundColor: Colors.purple, foregroundColor: Colors.white),
+                    icon: const Icon(Icons.account_balance),
+                    label: const Text('TRANSF.', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                    onPressed: () => _ejecutarCobroEImprimirTicket(metodo: "Transferencia"),
                   ))
                 ],
               )

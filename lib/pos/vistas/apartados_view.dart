@@ -12,7 +12,7 @@ import '../../services/api_service.dart';
 import '../utils/escaner_utils.dart';
 
 // ============================================================================
-// 🚨 VISTA 4: MÓDULO DE APARTADOS (ABONOS Y LIQUIDACIÓN INTELIGENTE)
+// 🚨 VISTA 4: MÓDULO DE APARTADOS (TRANSFERENCIA, TELÉFONO Y COMISIONES)
 // ============================================================================
 class ApartadosView extends StatefulWidget {
   final Function(double) onVentaExitosa;
@@ -23,16 +23,25 @@ class ApartadosView extends StatefulWidget {
 
 class _ApartadosViewState extends State<ApartadosView> {
   final TextEditingController _clienteController = TextEditingController();
+  final TextEditingController _telefonoController = TextEditingController(); 
   final TextEditingController _buscadorController = TextEditingController();
   final TextEditingController _engancheController = TextEditingController();
+  final TextEditingController _cuponController = TextEditingController(); // 🚨 NUEVO
   final FocusNode _buscadorFocus = FocusNode(); 
 
   final List<Map<String, dynamic>> _carritoApartado = [];
   List<dynamic> _catalogoReal = [];
   List<dynamic> _apartadosActivos = [];
 
+  double _subtotalApartado = 0.0;
+  double _descuentoAplicado = 0.0;
   double _totalApartado = 0.0;
+  String _vendedorAsociado = ""; // 🚨 NUEVO
+  double _descuentoPorPieza = 0.0; // 🚨 NUEVO
+
   bool _procesando = false;
+  String _metodoPagoNuevo = 'Efectivo';
+  Timer? _mpPollingTimer; 
 
   @override
   void initState() {
@@ -43,33 +52,55 @@ class _ApartadosViewState extends State<ApartadosView> {
 
   @override
   void dispose() {
+    _mpPollingTimer?.cancel();
     _buscadorFocus.dispose();
+    _clienteController.dispose();
+    _telefonoController.dispose();
+    _buscadorController.dispose();
+    _engancheController.dispose();
+    _cuponController.dispose();
     super.dispose();
   }
 
   Future<void> _cargarCatalogo() async {
     try {
       var res = await http.get(Uri.parse('${ApiService.baseUrl}/pos/catalogo'));
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       if (res.statusCode == 200) {
         var data = jsonDecode(res.body);
-        if (data['exito'] == true) setState(() => _catalogoReal = data['productos']);
+        if (data['exito'] == true) {
+          setState(() {
+            _catalogoReal = data['productos'];
+          });
+        }
       }
-    } catch(e) { debugPrint('Aviso: $e'); }
+    } catch(e) { 
+      debugPrint('Aviso: $e'); 
+    }
   }
 
   Future<void> _cargarApartados() async {
     try {
       var res = await http.get(Uri.parse('${ApiService.baseUrl}/pos/apartados'));
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       if (res.statusCode == 200) {
         var data = jsonDecode(res.body);
-        if (data['exito'] == true) setState(() => _apartadosActivos = data['apartados']);
+        if (data['exito'] == true) {
+          setState(() {
+            _apartadosActivos = data['apartados'];
+          });
+        }
       }
-    } catch(e) { debugPrint("Aviso: $e"); }
+    } catch(e) { 
+      debugPrint("Aviso: $e"); 
+    }
   }
 
-  Future<void> _registrarMovimientoApartado(String tipo, String clienteConDetalle, double monto) async {
+  Future<void> _registrarMovimientoApartado(String tipo, String clienteConDetalle, double monto, String metodo) async {
     final prefs = await SharedPreferences.getInstance();
     final String? apartadosStr = prefs.getString('caja_apartados_detalles');
     List<dynamic> apartados = apartadosStr != null ? jsonDecode(apartadosStr) : [];
@@ -77,7 +108,8 @@ class _ApartadosViewState extends State<ApartadosView> {
     apartados.add({
       'tipo': tipo,
       'cliente': clienteConDetalle,
-      'monto': monto
+      'monto': monto,
+      'metodo': metodo 
     });
     
     await prefs.setString('caja_apartados_detalles', jsonEncode(apartados));
@@ -110,7 +142,9 @@ class _ApartadosViewState extends State<ApartadosView> {
   }
 
   void _agregarPrenda(String codigo) {
-    if (codigo.isEmpty) return;
+    if (codigo.isEmpty) {
+      return;
+    }
     
     final datosEscaneo = decodificarEscaneo(codigo);
     String skuLimpio = datosEscaneo['sku']!;
@@ -164,8 +198,173 @@ class _ApartadosViewState extends State<ApartadosView> {
     });
   }
 
+  void _quitarDelCarrito(int index) {
+    setState(() {
+      _carritoApartado.removeAt(index);
+      if (_carritoApartado.isEmpty) {
+        _descuentoAplicado = 0.0;
+        _vendedorAsociado = "";
+        _cuponController.clear();
+        _descuentoPorPieza = 0.0;
+        _subtotalApartado = 0.0;
+      }
+      _calcularTotal();
+      _buscadorFocus.requestFocus();
+    });
+  }
+
+  // 🚨 NUEVA FUNCIÓN: VALIDAR CUPÓN/VENDEDOR
+  Future<void> _aplicarCupon() async {
+    if (_carritoApartado.isEmpty) {
+      return;
+    }
+    String codigoIngresado = _cuponController.text.trim().toUpperCase();
+
+    try {
+      var res = await http.get(Uri.parse('${ApiService.baseUrl}/cupones/validar/$codigoIngresado'));
+      if (!mounted) {
+        return;
+      }
+      var data = jsonDecode(res.body);
+
+      if (data['valido'] == true) {
+        setState(() {
+          _vendedorAsociado = codigoIngresado;
+          _descuentoPorPieza = double.tryParse(data['descuento'].toString()) ?? 0.0;
+          _calcularTotal();
+        });
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Código aplicado con éxito'), backgroundColor: Colors.green));
+      } else {
+        setState(() {
+          _vendedorAsociado = "";
+          _descuentoPorPieza = 0.0;
+          _calcularTotal();
+        });
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Código inválido o inactivo'), backgroundColor: Colors.red));
+      }
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error al conectar con servidor'), backgroundColor: Colors.orange));
+    }
+  }
+
   void _calcularTotal() {
-    _totalApartado = _carritoApartado.fold(0, (sum, item) => sum + (item["precio"] * item["cantidad"]));
+    int piezasTotales = _carritoApartado.fold(0, (sum, item) => sum + (item['cantidad'] as int));
+    _descuentoAplicado = _descuentoPorPieza * piezasTotales;
+    _subtotalApartado = _carritoApartado.fold(0, (sum, item) => sum + (item["precio"] * item["cantidad"]));
+    _totalApartado = _subtotalApartado - _descuentoAplicado;
+    if (_totalApartado < 0) {
+      _totalApartado = 0;
+    }
+  }
+
+  Future<void> _iniciarCobroTerminalMP(double montoACobrar, String tipoMovimiento, {Map<String, dynamic>? apartadoOriginal, bool? esLiquidacion, double? cambio, double? pagoCliente}) async {
+    setState(() {
+      _procesando = true;
+    });
+
+    final nav = Navigator.of(context, rootNavigator: true);
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext contextDialog) {
+        return AlertDialog(
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: const [
+              CircularProgressIndicator(color: Colors.blue),
+              SizedBox(height: 20),
+              Text("Conectando con la terminal...", style: TextStyle(fontWeight: FontWeight.bold)),
+              SizedBox(height: 10),
+              Text("Por favor, pídele al cliente que acerque su tarjeta.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey, fontSize: 12)),
+            ],
+          ),
+        );
+      },
+    );
+
+    try {
+      var res = await http.post(
+        Uri.parse('${ApiService.baseUrl}/pos/mp/cobrar-terminal'),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({"total": montoACobrar})
+      );
+      
+      if (!mounted) {
+        return;
+      }
+      
+      var data = jsonDecode(res.body);
+      
+      if (data['exito'] == true && data['intent_id'] != null) {
+        String intentId = data['intent_id'];
+        
+        _mpPollingTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
+          try {
+            var statusRes = await http.get(Uri.parse('${ApiService.baseUrl}/pos/mp/estado-cobro/$intentId'));
+            var statusData = jsonDecode(statusRes.body);
+            
+            if (statusData['exito'] == true) {
+              String estado = statusData['estado'];
+              
+              if (estado == 'FINISHED') {
+                timer.cancel();
+                if (!mounted) {
+                  return;
+                }
+                nav.pop(); 
+                
+                if (tipoMovimiento == 'NUEVO') {
+                  _ejecutarCrearApartado(montoACobrar, "Tarjeta MP");
+                } else {
+                  _ejecutarAbonoOLiquidacion(montoACobrar, esLiquidacion ?? false, apartadoOriginal!, "Tarjeta MP", cambio ?? 0, pagoCliente ?? 0);
+                }
+
+              } else if (estado == 'CANCELED' || estado == 'ERROR') {
+                timer.cancel();
+                if (!mounted) {
+                  return;
+                }
+                nav.pop();
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Pago cancelado o rechazado ($estado)'), backgroundColor: Colors.red));
+                setState(() {
+                  _procesando = false;
+                });
+              }
+            }
+          } catch(e) {
+             timer.cancel();
+             if (!mounted) {
+               return;
+             }
+             nav.pop();
+             setState(() {
+               _procesando = false;
+             });
+             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error al consultar estado de MP'), backgroundColor: Colors.red));
+          }
+        });
+
+      } else {
+        nav.pop();
+        setState(() {
+          _procesando = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(data['error'] ?? 'No se pudo conectar a la terminal'), backgroundColor: Colors.red));
+      }
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      nav.pop();
+      setState(() {
+        _procesando = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error de red: $e'), backgroundColor: Colors.red));
+    }
   }
 
   Future<void> _crearApartadoEImprimir() async {
@@ -179,42 +378,94 @@ class _ApartadosViewState extends State<ApartadosView> {
       return;
     }
 
-    final sm = ScaffoldMessenger.of(context); 
+    if (_metodoPagoNuevo == 'Tarjeta MP') {
+      _iniciarCobroTerminalMP(enganche, 'NUEVO');
+    } else if (_metodoPagoNuevo == 'Transferencia') {
+      _ejecutarCrearApartado(enganche, "Transferencia");
+    } else {
+      _ejecutarCrearApartado(enganche, "Efectivo");
+    }
+  }
 
-    setState(() => _procesando = true);
+  Future<void> _ejecutarCrearApartado(double enganche, String metodoPagoVerificado) async {
+    setState(() {
+      _procesando = true;
+    });
+
+    final sm = ScaffoldMessenger.of(context); 
+    
+    // 🚨 APLICAMOS EL DESCUENTO REAL AL CARRITO QUE SE ENVÍA A LA BD
+    List<Map<String, dynamic>> carritoAEnviar = _carritoApartado.map((item) {
+      var mod = Map<String, dynamic>.from(item);
+      mod['precio'] = (mod['precio'] - _descuentoPorPieza).clamp(0.0, double.infinity);
+      mod['vendedor'] = _vendedorAsociado; // Lo guardamos en el JSON para recuperarlo en el futuro
+      return mod;
+    }).toList();
+    
+    // 🚨 CONSTRUIMOS EL NOMBRE MAESTRO (Teléfono + Vendedor)
+    String nombreFinalCliente = _clienteController.text.trim();
+    if (_telefonoController.text.trim().isNotEmpty) {
+      nombreFinalCliente += " (Tel: ${_telefonoController.text.trim()})";
+    }
+    if (_vendedorAsociado.isNotEmpty) {
+      nombreFinalCliente += " | Vendedor: $_vendedorAsociado";
+    }
 
     try {
       var res = await http.post(
         Uri.parse('${ApiService.baseUrl}/pos/apartados/nuevo'),
         headers: {"Content-Type": "application/json"},
-        body: jsonEncode({"cliente": _clienteController.text, "carrito": _carritoApartado, "enganche": enganche, "total": _totalApartado})
+        body: jsonEncode({
+          "cliente": nombreFinalCliente, 
+          "carrito": carritoAEnviar, 
+          "enganche": enganche, 
+          "total": _totalApartado,
+          "metodo_pago": metodoPagoVerificado
+        })
       );
-      if (!mounted) return;
+      
+      if (!mounted) {
+        return;
+      }
       
       var data = jsonDecode(res.body);
       if (data['exito'] == true || res.statusCode == 404) {
         
+        String descuentoTxt = _vendedorAsociado.isNotEmpty ? "Desc. ($_vendedorAsociado): -\$${_descuentoAplicado.toStringAsFixed(2)}" : "";
+
         await _imprimirTicketApartado(
           "TICKET DE APARTADO", 
-          _clienteController.text, 
-          _carritoApartado, 
+          nombreFinalCliente, 
+          carritoAEnviar, 
           _totalApartado, 
           enganche, 
-          _totalApartado - enganche
+          _totalApartado - enganche,
+          metodoPago: metodoPagoVerificado,
+          descuentoTxt: descuentoTxt
         );
-        if (!mounted) return;
+        
+        if (!mounted) {
+          return;
+        }
 
         widget.onVentaExitosa(enganche);
         
-        // 🚨 AHORA SÍ: El resumen para el corte de caja incluye el [SKU: ...]
-        String resumenPrendas = _carritoApartado.map((item) => "${item['cantidad']}x [SKU: ${item['sku']}] ${item['nombre']}").join(", ");
-        await _registrarMovimientoApartado('NUEVO APARTADO', "${_clienteController.text} ($resumenPrendas)", enganche);
+        String resumenPrendas = carritoAEnviar.map((item) => "${item['cantidad']}x [SKU: ${item['sku']}] ${item['nombre']}").join(", ");
+        
+        await _registrarMovimientoApartado('NUEVO APARTADO', "$nombreFinalCliente ($resumenPrendas)", enganche, metodoPagoVerificado);
 
         setState(() {
           _carritoApartado.clear();
           _clienteController.clear();
+          _telefonoController.clear(); 
           _engancheController.clear();
+          _cuponController.clear();
           _totalApartado = 0.0;
+          _subtotalApartado = 0.0;
+          _descuentoAplicado = 0.0;
+          _descuentoPorPieza = 0.0;
+          _vendedorAsociado = "";
+          _metodoPagoNuevo = 'Efectivo';
         });
         
         await _cargarApartados();
@@ -223,14 +474,75 @@ class _ApartadosViewState extends State<ApartadosView> {
     } catch(e) { 
       debugPrint('Aviso al crear apartado: $e'); 
     } finally { 
-      if (mounted) setState(() => _procesando = false); 
+      if (mounted) {
+        setState(() {
+          _procesando = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _ejecutarAbonoOLiquidacion(double dineroParaCuenta, bool esLiquidacion, Map<String, dynamic> apartado, String metodoPagoFinal, double cambio, double pago) async {
+    setState(() {
+      _procesando = true;
+    });
+    
+    final sm = ScaffoldMessenger.of(context); 
+
+    try {
+      String url = esLiquidacion 
+          ? '${ApiService.baseUrl}/pos/apartados/liquidar/${apartado['id']}' 
+          : '${ApiService.baseUrl}/pos/apartados/abonar/${apartado['id']}'; 
+          
+      double totalOriginal = double.tryParse(apartado['total'].toString()) ?? 0.0;
+      double restaAnterior = double.tryParse(apartado['resta'].toString()) ?? 0.0;
+      double nuevaResta = esLiquidacion ? 0.0 : (restaAnterior - dineroParaCuenta);
+
+      await http.post(
+        Uri.parse(url), 
+        body: jsonEncode({
+          "pago": dineroParaCuenta,
+          "metodo_pago": metodoPagoFinal 
+        }), 
+        headers: {"Content-Type": "application/json"}
+      );
+      
+      if (!mounted) {
+        return;
+      }
+      
+      widget.onVentaExitosa(dineroParaCuenta);
+      await _cargarApartados();
+      
+      List<dynamic> itemsRecuperados = jsonDecode(apartado['items'] ?? '[]');
+      List<Map<String, dynamic>> carritoRecuperado = itemsRecuperados.map((e) => Map<String,dynamic>.from(e)).toList();
+      
+      if (esLiquidacion) {
+        String resumenPrendas = carritoRecuperado.map((item) => "${item['cantidad']}x [SKU: ${item['sku']}] ${item['nombre']}").join(", ");
+        await _registrarMovimientoApartado('LIQUIDACIÓN', "${apartado['cliente']} ($resumenPrendas)", dineroParaCuenta, metodoPagoFinal);
+        await _imprimirTicketApartado("LIQUIDACIÓN DE APARTADO", apartado['cliente'].toString(), carritoRecuperado, totalOriginal, dineroParaCuenta, 0.0, cambio: cambio, pagoCliente: pago, metodoPago: metodoPagoFinal);
+        sm.showSnackBar(const SnackBar(content: Text('Cuenta liquidada. Ticket impreso.'), backgroundColor: Colors.green));
+      } else {
+        await _registrarMovimientoApartado('ABONO', apartado['cliente'].toString(), dineroParaCuenta, metodoPagoFinal);
+        await _imprimirTicketApartado("ABONO A CUENTA", apartado['cliente'].toString(), carritoRecuperado, totalOriginal, dineroParaCuenta, nuevaResta, metodoPago: metodoPagoFinal);
+        sm.showSnackBar(const SnackBar(content: Text('Abono registrado. Ticket impreso.'), backgroundColor: Colors.orange));
+      }
+    } catch(e) { 
+      debugPrint('Aviso liquidar/abonar: $e'); 
+    } finally { 
+      if (mounted) {
+        setState(() {
+          _procesando = false;
+        });
+      }
     }
   }
 
   void _abrirDialogoLiquidarOAbonar(Map<String, dynamic> apartado) {
     double restaAnterior = double.tryParse(apartado['resta'].toString()) ?? 0.0;
-    double totalOriginal = double.tryParse(apartado['total'].toString()) ?? 0.0;
     TextEditingController pagoController = TextEditingController();
+    
+    String metodoPagoAbono = 'Efectivo';
 
     showDialog(
       context: context,
@@ -242,7 +554,7 @@ class _ApartadosViewState extends State<ApartadosView> {
           double nuevaResta = esLiquidacion ? 0.0 : (restaAnterior - pago);
 
           return AlertDialog(
-            title: Text('Cobrar - ${apartado['cliente']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            title: Text('Cobrar - ${apartado['cliente'].toString().split('|')[0].trim()}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -255,7 +567,60 @@ class _ApartadosViewState extends State<ApartadosView> {
                   onChanged: (val) => setStateDialog(() {}),
                   decoration: const InputDecoration(labelText: 'Dinero que entrega el cliente (\$)', border: OutlineInputBorder(), prefixIcon: Icon(Icons.attach_money)),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 15),
+                
+                const Text('MÉTODO DE PAGO:', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey)),
+                const SizedBox(height: 5),
+                Row(
+                  children: [
+                    Expanded(
+                      child: InkWell(
+                        onTap: () => setStateDialog(() => metodoPagoAbono = 'Efectivo'),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          decoration: BoxDecoration(
+                            color: metodoPagoAbono == 'Efectivo' ? Colors.green.shade50 : Colors.white,
+                            border: Border.all(color: metodoPagoAbono == 'Efectivo' ? Colors.green : Colors.grey.shade300),
+                            borderRadius: BorderRadius.circular(6)
+                          ),
+                          child: Center(child: Text('EFECT.', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10, color: metodoPagoAbono == 'Efectivo' ? Colors.green : Colors.grey))),
+                        ),
+                      )
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: InkWell(
+                        onTap: () => setStateDialog(() => metodoPagoAbono = 'Tarjeta MP'),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          decoration: BoxDecoration(
+                            color: metodoPagoAbono == 'Tarjeta MP' ? Colors.blue.shade50 : Colors.white,
+                            border: Border.all(color: metodoPagoAbono == 'Tarjeta MP' ? Colors.blue : Colors.grey.shade300),
+                            borderRadius: BorderRadius.circular(6)
+                          ),
+                          child: Center(child: Text('TARJ. MP', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10, color: metodoPagoAbono == 'Tarjeta MP' ? Colors.blue : Colors.grey))),
+                        ),
+                      )
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: InkWell(
+                        onTap: () => setStateDialog(() => metodoPagoAbono = 'Transferencia'),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          decoration: BoxDecoration(
+                            color: metodoPagoAbono == 'Transferencia' ? Colors.purple.shade50 : Colors.white,
+                            border: Border.all(color: metodoPagoAbono == 'Transferencia' ? Colors.purple : Colors.grey.shade300),
+                            borderRadius: BorderRadius.circular(6)
+                          ),
+                          child: Center(child: Text('TRANSF.', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10, color: metodoPagoAbono == 'Transferencia' ? Colors.purple : Colors.grey))),
+                        ),
+                      )
+                    ),
+                  ]
+                ),
+                
+                const SizedBox(height: 15),
                 if (esLiquidacion) ...[
                   Text('LIQUIDA CUENTA', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green.shade700)),
                   Text('CAMBIO: \$${cambio.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: Colors.green)),
@@ -271,38 +636,17 @@ class _ApartadosViewState extends State<ApartadosView> {
                 style: ElevatedButton.styleFrom(backgroundColor: esLiquidacion ? Colors.black : Colors.orange, foregroundColor: Colors.white),
                 onPressed: pago > 0 ? () async {
                   Navigator.pop(contextDialog);
-                  if (mounted) setState(() => _procesando = true);
                   
-                  final sm = ScaffoldMessenger.of(context); 
+                  double dineroParaCuenta = esLiquidacion ? restaAnterior : pago;
+                  
+                  if (metodoPagoAbono == 'Tarjeta MP') {
+                    _iniciarCobroTerminalMP(dineroParaCuenta, esLiquidacion ? 'LIQUIDACION' : 'ABONO', apartadoOriginal: apartado, esLiquidacion: esLiquidacion, cambio: cambio, pagoCliente: pago);
+                  } else if (metodoPagoAbono == 'Transferencia') {
+                    _ejecutarAbonoOLiquidacion(dineroParaCuenta, esLiquidacion, apartado, "Transferencia", cambio, pago);
+                  } else {
+                    _ejecutarAbonoOLiquidacion(dineroParaCuenta, esLiquidacion, apartado, "Efectivo", cambio, pago);
+                  }
 
-                  try {
-                    String url = esLiquidacion 
-                        ? '${ApiService.baseUrl}/pos/apartados/liquidar/${apartado['id']}' 
-                        : '${ApiService.baseUrl}/pos/apartados/abonar/${apartado['id']}'; 
-                        
-                    double dineroParaCuenta = esLiquidacion ? restaAnterior : pago;
-
-                    await http.post(Uri.parse(url), body: jsonEncode({"pago": dineroParaCuenta}), headers: {"Content-Type": "application/json"});
-                    if (!mounted) return;
-                    
-                    widget.onVentaExitosa(dineroParaCuenta);
-                    await _cargarApartados();
-                    
-                    List<dynamic> itemsRecuperados = jsonDecode(apartado['items'] ?? '[]');
-                    List<Map<String, dynamic>> carritoRecuperado = itemsRecuperados.map((e) => Map<String,dynamic>.from(e)).toList();
-                    
-                    if (esLiquidacion) {
-                      // 🚨 AHORA SÍ: El resumen para el corte de caja incluye el [SKU: ...] al liquidar
-                      String resumenPrendas = carritoRecuperado.map((item) => "${item['cantidad']}x [SKU: ${item['sku']}] ${item['nombre']}").join(", ");
-                      await _registrarMovimientoApartado('LIQUIDACIÓN', "${apartado['cliente']} ($resumenPrendas)", dineroParaCuenta);
-                      await _imprimirTicketApartado("LIQUIDACIÓN DE APARTADO", apartado['cliente'], carritoRecuperado, totalOriginal, dineroParaCuenta, 0.0, cambio: cambio, pagoCliente: pago);
-                      sm.showSnackBar(const SnackBar(content: Text('Cuenta liquidada. Ticket impreso.'), backgroundColor: Colors.green));
-                    } else {
-                      await _registrarMovimientoApartado('ABONO', apartado['cliente'].toString(), dineroParaCuenta);
-                      await _imprimirTicketApartado("ABONO A CUENTA", apartado['cliente'], carritoRecuperado, totalOriginal, pago, nuevaResta);
-                      sm.showSnackBar(const SnackBar(content: Text('Abono registrado. Ticket impreso.'), backgroundColor: Colors.orange));
-                    }
-                  } catch(e) { debugPrint('Aviso liquidar/abonar: $e'); } finally { if (mounted) setState(() => _procesando = false); }
                 } : null,
                 child: Text(esLiquidacion ? 'COBRAR Y LIQUIDAR' : 'REGISTRAR ABONO'),
               )
@@ -313,10 +657,14 @@ class _ApartadosViewState extends State<ApartadosView> {
     );
   }
 
-  Future<void> _imprimirTicketApartado(String titulo, String cliente, List<Map<String, dynamic>> carrito, double total, double pagoActual, double resta, {double cambio = 0.0, double pagoCliente = 0.0}) async {
+  Future<void> _imprimirTicketApartado(String titulo, String cliente, List<Map<String, dynamic>> carrito, double total, double pagoActual, double resta, {double cambio = 0.0, double pagoCliente = 0.0, String metodoPago = 'Efectivo', String descuentoTxt = ''}) async {
     final doc = pw.Document();
     pw.MemoryImage? imageLogo;
-    try { imageLogo = pw.MemoryImage((await rootBundle.load('assets/logo.png')).buffer.asUint8List()); } catch (e) { debugPrint('Logo: $e'); }
+    try { 
+      imageLogo = pw.MemoryImage((await rootBundle.load('assets/logo.png')).buffer.asUint8List()); 
+    } catch (e) { 
+      debugPrint('Logo: $e'); 
+    }
     
     final now = DateTime.now();
     final fecha = '${now.day}/${now.month}/${now.year} ${now.hour}:${now.minute}';
@@ -335,7 +683,8 @@ class _ApartadosViewState extends State<ApartadosView> {
               pw.Text(titulo, style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
               pw.SizedBox(height: 5),
               pw.Text('Fecha: $fecha', style: const pw.TextStyle(fontSize: 8)),
-              pw.Text('Cliente: ${cliente.toUpperCase()}', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+              pw.Text('Cliente: ${cliente.toUpperCase()}', textAlign: pw.TextAlign.center, style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+              pw.Text('Método: $metodoPago', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
               pw.Divider(borderStyle: pw.BorderStyle.dashed),
               ...carrito.map((item) => pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
@@ -345,6 +694,10 @@ class _ApartadosViewState extends State<ApartadosView> {
                 ]
               )),
               pw.Divider(borderStyle: pw.BorderStyle.dashed),
+              if (descuentoTxt.isNotEmpty) ...[
+                pw.Text(descuentoTxt, style: const pw.TextStyle(fontSize: 8)),
+                pw.SizedBox(height: 5),
+              ],
               pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text('TOTAL ORIGINAL', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)), pw.Text('\$${total.toStringAsFixed(2)}', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold))]),
               pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text('SU PAGO HOY', style: const pw.TextStyle(fontSize: 10)), pw.Text('\$${pagoActual.toStringAsFixed(2)}', style: const pw.TextStyle(fontSize: 10))]),
               pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [pw.Text('RESTA POR PAGAR', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)), pw.Text('\$${resta.toStringAsFixed(2)}', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold))]),
@@ -381,13 +734,27 @@ class _ApartadosViewState extends State<ApartadosView> {
     );
 
     if (conf == true) {
-      if (mounted) setState(() => _procesando = true);
+      if (mounted) {
+        setState(() {
+          _procesando = true;
+        });
+      }
       try {
         await http.post(Uri.parse('${ApiService.baseUrl}/pos/apartados/cancelar/$idApartado'));
-        if (!mounted) return;
+        if (!mounted) {
+          return;
+        }
         await _cargarApartados();
         sm.showSnackBar(const SnackBar(content: Text('Prendas devueltas al stock'), backgroundColor: Colors.green)); 
-      } catch(e) { debugPrint('Aviso devolver stock: $e'); } finally { if (mounted) setState(() => _procesando = false); }
+      } catch(e) { 
+        debugPrint('Aviso devolver stock: $e'); 
+      } finally { 
+        if (mounted) {
+          setState(() {
+            _procesando = false;
+          });
+        }
+      }
     }
   }
 
@@ -399,6 +766,8 @@ class _ApartadosViewState extends State<ApartadosView> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         TextField(controller: _clienteController, decoration: const InputDecoration(labelText: 'Nombre del Cliente', border: OutlineInputBorder(), prefixIcon: Icon(Icons.person))),
+        const SizedBox(height: 10),
+        TextField(controller: _telefonoController, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Teléfono (Opcional - Recordatorios)', border: OutlineInputBorder(), prefixIcon: Icon(Icons.phone))),
         const SizedBox(height: 16),
         TextField(controller: _buscadorController, focusNode: _buscadorFocus, decoration: InputDecoration(labelText: 'Escanear Código / QR', border: const OutlineInputBorder(), prefixIcon: const Icon(Icons.qr_code_scanner), suffixIcon: IconButton(icon: const Icon(Icons.search), onPressed: () => _agregarPrenda(_buscadorController.text))), onSubmitted: _agregarPrenda),
         const SizedBox(height: 16),
@@ -413,14 +782,83 @@ class _ApartadosViewState extends State<ApartadosView> {
                   leading: Image.network(_carritoApartado[i]['foto_url'], width: 40, height: 40, fit: BoxFit.cover),
                   title: Text('${_carritoApartado[i]['sku']} - ${_carritoApartado[i]['nombre']}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                   subtitle: Text('Talla: ${_carritoApartado[i]['talla']} | ${_carritoApartado[i]['cantidad']}x', style: const TextStyle(fontSize: 10)),
-                  trailing: IconButton(icon: const Icon(Icons.close, color: Colors.red, size: 16), onPressed: () => setState(() { _carritoApartado.removeAt(i); _calcularTotal(); })),
+                  trailing: IconButton(icon: const Icon(Icons.close, color: Colors.red, size: 16), onPressed: () => _quitarDelCarrito(i)),
                 ),
               ),
         ),
         const SizedBox(height: 16),
+
+        // 🚨 SECCIÓN DE CÓDIGO CREADOR
+        Row(children: [
+          Expanded(child: TextField(controller: _cuponController, decoration: const InputDecoration(isDense: true, labelText: 'Código Creador / Vendedor', border: OutlineInputBorder(), prefixIcon: Icon(Icons.local_offer_outlined, size: 18)))),
+          const SizedBox(width: 10),
+          ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white), onPressed: _aplicarCupon, child: const Text('APLICAR'))
+        ]),
+        const SizedBox(height: 20),
+
+        if (_descuentoAplicado > 0) ...[
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            const Text('Subtotal', style: TextStyle(color: Colors.grey)),
+            Text('\$${_subtotalApartado.toStringAsFixed(2)}', style: const TextStyle(color: Colors.grey))
+          ]),
+          const SizedBox(height: 5),
+          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+            Text('Código: $_vendedorAsociado', style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 12)),
+            Text('-\$${_descuentoAplicado.toStringAsFixed(2)}', style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold))
+          ]),
+          const Divider(height: 20)
+        ],
+
         Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('TOTAL:', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)), Text('\$${_totalApartado.toStringAsFixed(2)}', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900))]),
         const SizedBox(height: 16),
         TextField(controller: _engancheController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Monto que deja (\$)', border: OutlineInputBorder(), prefixIcon: Icon(Icons.attach_money), filled: true, fillColor: Color(0xFFF9F9F9))),
+        const SizedBox(height: 15),
+        
+        const Text('MÉTODO DE PAGO:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  backgroundColor: _metodoPagoNuevo == 'Efectivo' ? Colors.green.shade50 : Colors.transparent,
+                  side: BorderSide(color: _metodoPagoNuevo == 'Efectivo' ? Colors.green : Colors.grey.shade400),
+                  padding: const EdgeInsets.symmetric(vertical: 14)
+                ),
+                icon: Icon(Icons.money, color: _metodoPagoNuevo == 'Efectivo' ? Colors.green : Colors.grey, size: 18),
+                label: Text('EFECT.', style: TextStyle(color: _metodoPagoNuevo == 'Efectivo' ? Colors.green : Colors.grey, fontWeight: FontWeight.bold, fontSize: 11)),
+                onPressed: () => setState(() => _metodoPagoNuevo = 'Efectivo'),
+              )
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  backgroundColor: _metodoPagoNuevo == 'Tarjeta MP' ? Colors.blue.shade50 : Colors.transparent,
+                  side: BorderSide(color: _metodoPagoNuevo == 'Tarjeta MP' ? Colors.blue : Colors.grey.shade400),
+                  padding: const EdgeInsets.symmetric(vertical: 14)
+                ),
+                icon: Icon(Icons.credit_card, color: _metodoPagoNuevo == 'Tarjeta MP' ? Colors.blue : Colors.grey, size: 18),
+                label: Text('TARJETA', style: TextStyle(color: _metodoPagoNuevo == 'Tarjeta MP' ? Colors.blue : Colors.grey, fontWeight: FontWeight.bold, fontSize: 11)),
+                onPressed: () => setState(() => _metodoPagoNuevo = 'Tarjeta MP'),
+              )
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  backgroundColor: _metodoPagoNuevo == 'Transferencia' ? Colors.purple.shade50 : Colors.transparent,
+                  side: BorderSide(color: _metodoPagoNuevo == 'Transferencia' ? Colors.purple : Colors.grey.shade400),
+                  padding: const EdgeInsets.symmetric(vertical: 14)
+                ),
+                icon: Icon(Icons.account_balance, color: _metodoPagoNuevo == 'Transferencia' ? Colors.purple : Colors.grey, size: 18),
+                label: Text('TRANSF.', style: TextStyle(color: _metodoPagoNuevo == 'Transferencia' ? Colors.purple : Colors.grey, fontWeight: FontWeight.bold, fontSize: 11)),
+                onPressed: () => setState(() => _metodoPagoNuevo = 'Transferencia'),
+              )
+            )
+          ],
+        ),
+        
         const SizedBox(height: 20),
         SizedBox(width: double.infinity, height: 50, child: ElevatedButton.icon(style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white), icon: _procesando ? const CircularProgressIndicator(color: Colors.white) : const Icon(Icons.print), label: const Text('GUARDAR E IMPRIMIR APARTADO'), onPressed: _procesando ? null : _crearApartadoEImprimir)),
       ],
@@ -432,6 +870,13 @@ class _ApartadosViewState extends State<ApartadosView> {
           itemCount: _apartadosActivos.length,
           itemBuilder: (c, i) {
             final apt = _apartadosActivos[i];
+            
+            // Recortar la vista del cliente para no mostrar el Teléfono ni el Vendedor completo si es muy largo
+            String vistaCliente = apt['cliente']?.toString() ?? 'Cliente';
+            if (vistaCliente.contains(' | Vendedor:')) {
+              vistaCliente = vistaCliente.split(' | Vendedor:')[0];
+            }
+
             return Card(
               margin: const EdgeInsets.only(bottom: 12),
               shape: RoundedRectangleBorder(side: const BorderSide(color: Colors.black12), borderRadius: BorderRadius.circular(8)),
@@ -443,7 +888,7 @@ class _ApartadosViewState extends State<ApartadosView> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(apt['cliente']?.toString() ?? 'Cliente', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                          Text(vistaCliente, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                           Text(apt['descripcion_prendas']?.toString() ?? 'Prendas varias', style: const TextStyle(color: Colors.grey, fontSize: 12)),
                           const SizedBox(height: 8),
                           Text('Resta: \$${apt['resta']}', style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 14)),
