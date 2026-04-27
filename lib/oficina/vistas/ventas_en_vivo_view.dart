@@ -88,283 +88,277 @@ class _VentasEnVivoViewState extends State<VentasEnVivoView> {
     }
 
     return Scaffold(
-      backgroundColor: Colors.white,
-      body: Padding(
-        padding: EdgeInsets.all(isMobile ? 16.0 : 32.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Wrap(
-              alignment: WrapAlignment.spaceBetween,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              spacing: 20,
-              runSpacing: 10,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('MONITOR DE VENTAS EN VIVO', style: TextStyle(fontSize: isMobile ? 18 : 24, fontWeight: FontWeight.w300, letterSpacing: 3)),
-                    const SizedBox(height: 4),
-                    const Text('Todas las transacciones recientes. Se actualiza automáticamente cada 30s.', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                  ],
-                ),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.black12)),
-                      child: DropdownButton<String>(
-                        value: _filtroActivo,
-                        underline: const SizedBox(),
-                        items: const [
-                          DropdownMenuItem(value: 'Hoy', child: Text('Solo Hoy', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
-                          DropdownMenuItem(value: 'Esta Semana', child: Text('Esta Semana (Desde Domingo)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.blue))),
-                        ],
-                        onChanged: (val) { if (val != null) { setState(() => _filtroActivo = val); _cargarVentasReales(); } },
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white),
-                      icon: const Icon(Icons.refresh, size: 16),
-                      label: const Text('FORZAR REFRESH'),
-                      onPressed: () => _cargarVentasReales(),
-                    )
-                  ],
-                )
-              ],
-            ),
-            const SizedBox(height: 20),
-            
-            // 🚨 DASHBOARD FINANCIERO EN VIVO (4 COLUMNAS)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.grey.shade50,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.black12)
-              ),
-              child: Column(
+      backgroundColor: const Color(0xFFF6F8FA), // 🎨 Fondo gris muy suave para que las tarjetas resalten
+      body: SafeArea(
+        child: Padding(
+          padding: EdgeInsets.all(isMobile ? 16.0 : 32.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 🎨 HEADER MÁS LIMPIO
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(_filtroActivo == 'Hoy' ? 'CAJA ACTUAL (HOY)' : 'CAJA ACUMULADA (SEMANA)', style: const TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1, color: Colors.black54)),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        flex: 2,
-                        child: Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.black12)),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('TOTAL BRUTO', style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
-                              const SizedBox(height: 4),
-                              FittedBox(fit: BoxFit.scaleDown, child: Text('\$${totalPeriodo.toStringAsFixed(2)}', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: Colors.black))),
-                            ],
-                          ),
-                        )
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        flex: 2,
-                        child: Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.green.shade200)),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('EFECTIVO', style: TextStyle(fontSize: 10, color: Colors.green, fontWeight: FontWeight.bold)),
-                              const SizedBox(height: 4),
-                              FittedBox(fit: BoxFit.scaleDown, child: Text('\$${totalEfectivo.toStringAsFixed(2)}', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.green.shade800))),
-                            ],
-                          ),
-                        )
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        flex: 2,
-                        child: Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.blue.shade200)),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('TARJETA MP', style: TextStyle(fontSize: 10, color: Colors.blue, fontWeight: FontWeight.bold)),
-                              const SizedBox(height: 4),
-                              FittedBox(fit: BoxFit.scaleDown, child: Text('\$${totalTarjeta.toStringAsFixed(2)}', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.blue.shade800))),
-                            ],
-                          ),
-                        )
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        flex: 2,
-                        child: Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(color: Colors.purple.shade50, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.purple.shade200)),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('TRANSF.', style: TextStyle(fontSize: 10, color: Colors.purple, fontWeight: FontWeight.bold)),
-                              const SizedBox(height: 4),
-                              FittedBox(fit: BoxFit.scaleDown, child: Text('\$${totalTransferencia.toStringAsFixed(2)}', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.purple.shade800))),
-                            ],
-                          ),
-                        )
-                      ),
-                    ],
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('MONITOR EN VIVO', style: TextStyle(fontSize: isMobile ? 22 : 28, fontWeight: FontWeight.w900, letterSpacing: 1.5, color: Colors.black87)),
+                        const SizedBox(height: 4),
+                        const Text('Sincronización automática cada 30s', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                      ],
+                    ),
                   ),
+                  if (!isMobile)
+                    _buildFiltrosYRefresh()
                 ],
               ),
-            ),
-            const SizedBox(height: 30),
+              if (isMobile) ...[
+                const SizedBox(height: 16),
+                _buildFiltrosYRefresh(),
+              ],
+              const SizedBox(height: 24),
+              
+              // 🎨 DASHBOARD MODERNO
+              Text(_filtroActivo == 'Hoy' ? 'CAJA ACTUAL (HOY)' : 'CAJA ACUMULADA (SEMANA)', style: const TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1, color: Colors.black54, fontSize: 11)),
+              const SizedBox(height: 12),
+              
+              GridView.count(
+                crossAxisCount: isMobile ? 2 : 4,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+                childAspectRatio: isMobile ? 1.8 : 2.2,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                children: [
+                  _buildKpiCard('TOTAL BRUTO', totalPeriodo, Colors.black87, Colors.white, Icons.account_balance_wallet),
+                  _buildKpiCard('EFECTIVO', totalEfectivo, Colors.green.shade700, Colors.green.shade50, Icons.payments),
+                  _buildKpiCard('TARJETA MP', totalTarjeta, Colors.blue.shade700, Colors.blue.shade50, Icons.credit_card),
+                  _buildKpiCard('TRANSFERENCIA', totalTransferencia, Colors.purple.shade700, Colors.purple.shade50, Icons.compare_arrows),
+                ],
+              ),
+              const SizedBox(height: 24),
 
-            Expanded(
-              child: _cargando && _ventasVisibles.isEmpty
-                ? const Center(child: CircularProgressIndicator(color: Colors.black))
-                : _ventasVisibles.isEmpty
-                  ? const Center(child: Text("Aún no hay ventas registradas en este periodo.", style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic)))
-                  : ListView.builder(
-                      itemCount: _ventasVisibles.length,
-                      itemBuilder: (context, index) {
-                        final v = _ventasVisibles[index];
-                        final String tipo = v['tipo'] ?? '';
-                        final String desc = v['descripcion'] ?? '';
-                        final double monto = double.tryParse(v['monto'].toString()) ?? 0;
-                        final String hora = v['hora_fmt'] ?? '';
-                        final String fecha = v['fecha_fmt'] ?? '';
-                        final String metodoPago = v['metodo_pago'] ?? 'Efectivo';
+              // 🎨 LISTA DE VENTAS TIPO "TIMELINE"
+              const Text('ÚLTIMOS MOVIMIENTOS', style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1, color: Colors.black54, fontSize: 11)),
+              const SizedBox(height: 12),
+              Expanded(
+                child: _cargando && _ventasVisibles.isEmpty
+                  ? const Center(child: CircularProgressIndicator(color: Colors.black))
+                  : _ventasVisibles.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.inbox_outlined, size: 64, color: Colors.grey.shade300),
+                            const SizedBox(height: 16),
+                            Text("Sin movimientos en este periodo.", style: TextStyle(color: Colors.grey.shade600, fontSize: 14)),
+                          ],
+                        ),
+                      )
+                    : ListView.builder(
+                        itemCount: _ventasVisibles.length,
+                        itemBuilder: (context, index) {
+                          final v = _ventasVisibles[index];
+                          final String tipo = v['tipo'] ?? '';
+                          final String desc = v['descripcion'] ?? '';
+                          final double monto = double.tryParse(v['monto'].toString()) ?? 0;
+                          final String hora = v['hora_fmt'] ?? '';
+                          final String fecha = v['fecha_fmt'] ?? '';
+                          final String metodoPago = v['metodo_pago'] ?? 'Efectivo';
 
-                        bool mostrarFecha = false;
-                        if (index == 0) {
-                          mostrarFecha = true;
-                        } else {
-                          final String fechaAnterior = _ventasVisibles[index - 1]['fecha_fmt'] ?? '';
-                          if (fecha != fechaAnterior) mostrarFecha = true;
-                        }
+                          bool mostrarFecha = false;
+                          if (index == 0) {
+                            mostrarFecha = true;
+                          } else {
+                            final String fechaAnterior = _ventasVisibles[index - 1]['fecha_fmt'] ?? '';
+                            if (fecha != fechaAnterior) mostrarFecha = true;
+                          }
 
-                        // 🚨 SEMÁFORO VISUAL POR TIPO DE MOVIMIENTO
-                        Color colorIcono = Colors.grey;
-                        IconData icono = Icons.info;
-                        
-                        if (tipo == 'VENTA_POS') { 
-                          colorIcono = Colors.green; 
-                          icono = Icons.point_of_sale; 
-                        } else if (tipo == 'LIQUIDACION_APARTADO') { 
-                          colorIcono = Colors.red; // LIQUIDADO = ROJO
-                          icono = Icons.task_alt; 
-                        } else if (tipo == 'ABONO_APARTADO') { 
-                          colorIcono = Colors.green.shade700; // ABONO = VERDE
-                          icono = Icons.payments; 
-                        } else if (tipo == 'ENGANCHE_APARTADO') { 
-                          colorIcono = Colors.amber.shade700; // NUEVO APARTADO = AMARILLO/ÁMBAR
-                          icono = Icons.bookmark; 
-                        } else if (tipo == 'CAMBIO_FISICO') { 
-                          colorIcono = Colors.purple; 
-                          icono = Icons.swap_horiz; 
-                        }
-                        
-                        // 🚨 COLORES PARA ETIQUETAS DE MÉTODO DE PAGO
-                        bool esTarjeta = metodoPago.contains('Tarjeta');
-                        bool esTransf = metodoPago.contains('Transferencia');
-                        
-                        Color colorMetodo = Colors.green.shade700;
-                        Color bgMetodo = Colors.green.shade50;
-                        IconData iconMetodo = Icons.money;
+                          // Colores por tipo de movimiento
+                          Color colorIcono = Colors.grey;
+                          IconData icono = Icons.info;
+                          Color bgIcono = Colors.grey.shade100;
+                          
+                          if (tipo == 'VENTA_POS') { 
+                            colorIcono = Colors.green.shade600; bgIcono = Colors.green.shade50; icono = Icons.point_of_sale; 
+                          } else if (tipo == 'LIQUIDACION_APARTADO') { 
+                            colorIcono = Colors.red.shade600; bgIcono = Colors.red.shade50; icono = Icons.task_alt; 
+                          } else if (tipo == 'ABONO_APARTADO') { 
+                            colorIcono = Colors.teal.shade600; bgIcono = Colors.teal.shade50; icono = Icons.payments_outlined; 
+                          } else if (tipo == 'ENGANCHE_APARTADO') { 
+                            colorIcono = Colors.amber.shade700; bgIcono = Colors.amber.shade50; icono = Icons.bookmark_added; 
+                          } else if (tipo == 'CAMBIO_FISICO') { 
+                            colorIcono = Colors.deepPurple.shade500; bgIcono = Colors.deepPurple.shade50; icono = Icons.swap_horiz; 
+                          } else if (tipo == 'PAGO_COMISIONES') { 
+                            colorIcono = Colors.redAccent; bgIcono = Colors.red.shade50; icono = Icons.money_off; 
+                          }
+                          
+                          // Badges (Etiquetas) para Método de Pago
+                          bool esTarjeta = metodoPago.contains('Tarjeta');
+                          bool esTransf = metodoPago.contains('Transferencia');
+                          
+                          Color colorMetodo = Colors.green.shade700;
+                          IconData iconMetodo = Icons.money;
 
-                        if (esTarjeta) {
-                          colorMetodo = Colors.blue.shade700;
-                          bgMetodo = Colors.blue.shade50;
-                          iconMetodo = Icons.credit_card;
-                        } else if (esTransf) {
-                          colorMetodo = Colors.purple.shade700;
-                          bgMetodo = Colors.purple.shade50;
-                          iconMetodo = Icons.account_balance;
-                        }
+                          if (esTarjeta) {
+                            colorMetodo = Colors.blue.shade700; iconMetodo = Icons.credit_card;
+                          } else if (esTransf) {
+                            colorMetodo = Colors.purple.shade700; iconMetodo = Icons.compare_arrows;
+                          }
 
-                        Widget tarjetaVenta = Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 8.0),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(10),
-                                decoration: BoxDecoration(color: colorIcono.withValues(alpha: 0.1), shape: BoxShape.circle),
-                                child: Icon(icono, color: colorIcono, size: 20),
-                              ),
-                              const SizedBox(width: 16),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
+                          // 🎨 TARJETA DE MOVIMIENTO
+                          Widget tarjetaVenta = Container(
+                            margin: const EdgeInsets.only(bottom: 12),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: Colors.grey.shade200),
+                              boxShadow: [
+                                BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 8, offset: const Offset(0, 4))
+                              ]
+                            ),
+                            padding: const EdgeInsets.all(16),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(color: bgIcono, shape: BoxShape.circle),
+                                  child: Icon(icono, color: colorIcono, size: 24),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Text(tipo.replaceAll('_', ' '), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: colorIcono)),
+                                          Text(hora, style: const TextStyle(color: Colors.grey, fontSize: 11, fontWeight: FontWeight.bold)),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(desc, style: const TextStyle(fontSize: 13, height: 1.4, color: Colors.black87)),
+                                      const SizedBox(height: 10),
+                                      Row(
+                                        children: [
+                                          Icon(iconMetodo, size: 12, color: colorMetodo),
+                                          const SizedBox(width: 4),
+                                          Text(metodoPago, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: colorMetodo)),
+                                        ],
+                                      )
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
-                                    Wrap(
-                                      spacing: 10,
-                                      runSpacing: 5,
-                                      crossAxisAlignment: WrapCrossAlignment.center,
-                                      children: [
-                                        Text(tipo.replaceAll('_', ' '), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10, color: colorIcono)),
-                                        Text('⌚ $hora', style: const TextStyle(color: Colors.grey, fontSize: 10, fontWeight: FontWeight.bold)),
-                                        // ETIQUETA DEL MÉTODO DE PAGO MEJORADA
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                          decoration: BoxDecoration(
-                                            color: bgMetodo,
-                                            border: Border.all(color: colorMetodo.withValues(alpha: 0.5)),
-                                            borderRadius: BorderRadius.circular(4)
-                                          ),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Icon(iconMetodo, size: 10, color: colorMetodo),
-                                              const SizedBox(width: 4),
-                                              Text(metodoPago, style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: colorMetodo)),
-                                            ],
-                                          ),
-                                        )
-                                      ],
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(desc, style: const TextStyle(fontSize: 13, height: 1.4)),
+                                    Text('\$${monto.abs().toStringAsFixed(2)}', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: monto < 0 ? Colors.redAccent : Colors.black87)),
+                                    if (monto < 0)
+                                      const Text('SALIDA', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.redAccent)),
                                   ],
                                 ),
-                              ),
-                              const SizedBox(width: 10),
-                              Text('\$${monto.toStringAsFixed(2)}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900)),
-                            ],
-                          ),
-                        );
-
-                        if (mostrarFecha) {
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Container(
-                                width: double.infinity,
-                                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                                color: Colors.grey.shade100,
-                                child: Text('🗓️ FECHA: $fecha', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.black87, letterSpacing: 1)),
-                              ),
-                              tarjetaVenta,
-                              if (index != _ventasVisibles.length - 1) const Divider(height: 1),
-                            ],
+                              ],
+                            ),
                           );
-                        }
 
-                        return Column(
-                          children: [
-                            tarjetaVenta,
-                            if (index != _ventasVisibles.length - 1) const Divider(height: 1),
-                          ],
-                        );
-                      },
-                    )
-            )
-          ],
+                          if (mostrarFecha) {
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 8, bottom: 12, left: 4),
+                                  child: Text('🗓️ $fecha', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 12, color: Colors.black54, letterSpacing: 1)),
+                                ),
+                                tarjetaVenta,
+                              ],
+                            );
+                          }
+
+                          return tarjetaVenta;
+                        },
+                      )
+              )
+            ],
+          ),
         ),
+      ),
+    );
+  }
+
+  // 🎨 BOTONES DE HEADER (Optimizados para verse bien juntos)
+  Widget _buildFiltrosYRefresh() {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          height: 40,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.grey.shade300)),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: _filtroActivo,
+              icon: const Icon(Icons.keyboard_arrow_down, size: 16, color: Colors.black54),
+              items: const [
+                DropdownMenuItem(value: 'Hoy', child: Text('Solo Hoy', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
+                DropdownMenuItem(value: 'Esta Semana', child: Text('Esta Semana', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.blue))),
+              ],
+              onChanged: (val) { if (val != null) { setState(() => _filtroActivo = val); _cargarVentasReales(); } },
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        SizedBox(
+          height: 40,
+          child: ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.black, 
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              padding: const EdgeInsets.symmetric(horizontal: 16)
+            ),
+            onPressed: () => _cargarVentasReales(),
+            child: const Icon(Icons.refresh, size: 18),
+          ),
+        )
+      ],
+    );
+  }
+
+  // 🎨 TARJETAS DE DASHBOARD INDIVIDUALES
+  Widget _buildKpiCard(String title, double amount, Color color, Color bg, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withValues(alpha: 0.15), width: 1.5),
+        boxShadow: [
+          BoxShadow(color: color.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 4))
+        ]
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 16, color: color),
+              const SizedBox(width: 6),
+              Expanded(child: Text(title, style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.bold, letterSpacing: 0.5), overflow: TextOverflow.ellipsis)),
+            ],
+          ),
+          const Spacer(),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text('\$${amount.toStringAsFixed(2)}', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: color, letterSpacing: -0.5)),
+          ),
+        ],
       ),
     );
   }

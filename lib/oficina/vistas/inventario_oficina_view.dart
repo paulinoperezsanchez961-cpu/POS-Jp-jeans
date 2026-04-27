@@ -11,6 +11,8 @@ class InventarioOficinaView extends StatefulWidget {
 
 class _InventarioOficinaViewState extends State<InventarioOficinaView> {
   List<dynamic> _stockReal = [];
+  List<dynamic> _productosFiltrados = [];
+  final TextEditingController _buscadorController = TextEditingController();
   bool _cargando = true;
 
   @override
@@ -19,11 +21,40 @@ class _InventarioOficinaViewState extends State<InventarioOficinaView> {
     _cargarDatos();
   }
 
-  Future<void> _cargarDatos() async {
-    setState(() => _cargando = true);
+  @override
+  void dispose() {
+    _buscadorController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _cargarDatos({bool silencioso = false}) async {
+    if (!silencioso) setState(() => _cargando = true);
+    
     final datos = await ApiService.obtenerInventario();
+    
     if (!mounted) return;
-    setState(() { _stockReal = datos; _cargando = false; });
+    setState(() { 
+      _stockReal = datos; 
+      _filtrarProductos(_buscadorController.text);
+      if (!silencioso) _cargando = false; 
+    });
+  }
+
+  // 🚨 NUEVA BARRA DE BÚSQUEDA INSTANTÁNEA
+  void _filtrarProductos(String query) {
+    if (query.isEmpty) {
+      setState(() => _productosFiltrados = List.from(_stockReal));
+      return;
+    }
+    
+    final q = query.toLowerCase();
+    setState(() {
+      _productosFiltrados = _stockReal.where((p) {
+        final sku = (p['sku'] ?? '').toString().toLowerCase();
+        final nombre = (p['nombre'] ?? '').toString().toLowerCase();
+        return sku.contains(q) || nombre.contains(q);
+      }).toList();
+    });
   }
 
   void _abrirCargaMasiva() {
@@ -130,10 +161,12 @@ class _InventarioOficinaViewState extends State<InventarioOficinaView> {
     }).toList();
   }
 
+  // 🚨 MUTACIÓN LOCAL: RESURTIDO (NO SE TRABA)
   void _abrirGestorResurtido(Map<String, dynamic> prod) {
     List<Map<String, dynamic>> tallasEnEdicion = _parsearTallasOficina(prod['tallas']);
     TextEditingController nuevaTallaCtrl = TextEditingController();
     TextEditingController nuevaCantCtrl = TextEditingController();
+    bool guardando = false;
 
     showDialog(
       context: context,
@@ -220,21 +253,29 @@ class _InventarioOficinaViewState extends State<InventarioOficinaView> {
                 TextButton(onPressed: () => Navigator.pop(contextDialog), child: const Text('Cancelar', style: TextStyle(color: Colors.grey))),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white),
-                  onPressed: () async {
+                  onPressed: guardando ? null : () async {
+                    setStateDialog(() => guardando = true);
                     final nav = Navigator.of(contextDialog);
                     final sm = ScaffoldMessenger.of(context);
                     
                     bool exito = await ApiService.resurtirProducto(prod['id'], tallasEnEdicion, stockTotalCalculado);
-                    nav.pop(); 
                     
+                    if (!mounted) return;
+
                     if (exito) {
+                      // 🚨 MUTACIÓN LOCAL: No recargamos toda la lista, actualizamos el producto en memoria
+                      setState(() {
+                         prod['tallas'] = jsonEncode(tallasEnEdicion);
+                         prod['stock_bodega'] = stockTotalCalculado;
+                      });
+                      nav.pop(); 
                       sm.showSnackBar(const SnackBar(content: Text('Resurtido exitoso. Stock actualizado.'), backgroundColor: Colors.green));
-                      _cargarDatos();
                     } else {
+                      setStateDialog(() => guardando = false);
                       sm.showSnackBar(const SnackBar(content: Text('Error al resurtir producto.'), backgroundColor: Colors.red));
                     }
                   },
-                  child: const Text('GUARDAR NUEVO STOCK')
+                  child: guardando ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Text('GUARDAR NUEVO STOCK')
                 )
               ]
             );
@@ -244,6 +285,7 @@ class _InventarioOficinaViewState extends State<InventarioOficinaView> {
     );
   }
 
+  // 🚨 MUTACIÓN LOCAL: ELIMINACIÓN (SIN REINICIAR SCROLL)
   Future<void> _eliminarProductoReal(int idProducto) async {
     bool? confirmar = await showDialog(
       context: context,
@@ -263,8 +305,12 @@ class _InventarioOficinaViewState extends State<InventarioOficinaView> {
         if (!mounted) return; 
 
         if (res) {
+          // 🚨 MUTACIÓN LOCAL: Lo borra visualmente al instante
+          setState(() {
+             _stockReal.removeWhere((element) => element['id'] == idProducto);
+             _filtrarProductos(_buscadorController.text);
+          });
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Producto eliminado exitosamente'), backgroundColor: Colors.green));
-          _cargarDatos();
         }
       } catch (e) {
         if (!mounted) return; 
@@ -273,10 +319,12 @@ class _InventarioOficinaViewState extends State<InventarioOficinaView> {
     }
   }
 
+  // 🚨 MUTACIÓN LOCAL: OFERTAS FLUIDAS (NO SE TRABA EL PROGRAMA)
   void _abrirGestorOferta(Map<String, dynamic> prod) {
     bool enRebaja = prod['en_rebaja'] == 1 || prod['en_rebaja'] == true;
     TextEditingController precioOfertaController = TextEditingController(text: prod['precio_rebaja']?.toString() ?? '');
-    
+    bool guardando = false;
+
     showDialog(
       context: context,
       builder: (contextDialog) {
@@ -311,7 +359,7 @@ class _InventarioOficinaViewState extends State<InventarioOficinaView> {
                 TextButton(onPressed: () => Navigator.pop(contextDialog), child: const Text('Cancelar', style: TextStyle(color: Colors.grey))),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white),
-                  onPressed: () async {
+                  onPressed: guardando ? null : () async {
                     double precioNuevo = double.tryParse(precioOfertaController.text) ?? 0;
                     final nav = Navigator.of(contextDialog);
                     final sm = ScaffoldMessenger.of(context);
@@ -321,15 +369,25 @@ class _InventarioOficinaViewState extends State<InventarioOficinaView> {
                       return;
                     }
                     
+                    setStateDialog(() => guardando = true);
                     bool exito = await ApiService.actualizarOferta(prod['id'], enRebaja, precioNuevo);
-                    nav.pop(); 
                     
-                    if(exito){
-                       _cargarDatos();
-                       sm.showSnackBar(const SnackBar(content: Text('Oferta actualizada'), backgroundColor: Colors.green));
+                    if (!mounted) return;
+
+                    if(exito) {
+                       // 🚨 MUTACIÓN LOCAL: Cambia el precio y el color de la tarjeta instantáneamente sin recargar la lista
+                       setState(() {
+                         prod['en_rebaja'] = enRebaja ? 1 : 0;
+                         prod['precio_rebaja'] = precioNuevo;
+                       });
+                       nav.pop(); 
+                       sm.showSnackBar(const SnackBar(content: Text('Oferta actualizada y guardada'), backgroundColor: Colors.green));
+                    } else {
+                       setStateDialog(() => guardando = false);
+                       sm.showSnackBar(const SnackBar(content: Text('Error al actualizar en servidor'), backgroundColor: Colors.red));
                     }
                   },
-                  child: const Text('GUARDAR OFERTA'),
+                  child: guardando ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Text('GUARDAR OFERTA'),
                 )
               ],
             );
@@ -371,23 +429,45 @@ class _InventarioOficinaViewState extends State<InventarioOficinaView> {
                 )
               ],
             ),
-            const SizedBox(height: 30),
+            const SizedBox(height: 20),
+            
+            // 🚨 BARRA DE BÚSQUEDA FLUIDA
+            TextField(
+              controller: _buscadorController,
+              onChanged: _filtrarProductos,
+              decoration: InputDecoration(
+                labelText: 'Buscar por SKU o Nombre del pantalón...',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _buscadorController.text.isNotEmpty 
+                  ? IconButton(icon: const Icon(Icons.clear), onPressed: () { 
+                      _buscadorController.clear(); 
+                      _filtrarProductos(''); 
+                      FocusScope.of(context).unfocus();
+                    }) 
+                  : null,
+                filled: true,
+                fillColor: Colors.grey.shade50,
+              ),
+            ),
+            const SizedBox(height: 20),
             
             Expanded(
               child: _cargando 
                 ? const Center(child: CircularProgressIndicator(color: Colors.black))
-                : _stockReal.isEmpty 
+                : _productosFiltrados.isEmpty 
                   ? const Center(child: Text("No hay productos en inventario", style: TextStyle(color: Colors.grey)))
                   : RefreshIndicator(
-                      onRefresh: _cargarDatos,
+                      onRefresh: () => _cargarDatos(silencioso: false),
                       color: Colors.black,
                       child: Container(
                         decoration: BoxDecoration(color: Colors.white, border: Border.all(color: Colors.black12), borderRadius: BorderRadius.circular(8)),
                         child: ListView.separated(
-                          itemCount: _stockReal.length,
+                          // 🚨 USAMOS LOS PRODUCTOS FILTRADOS
+                          itemCount: _productosFiltrados.length,
                           separatorBuilder: (context, index) => const Divider(height: 1),
                           itemBuilder: (context, index) {
-                            final prod = _stockReal[index];
+                            final prod = _productosFiltrados[index];
                             final String nombre = prod['nombre'] ?? 'Sin nombre';
                             final String corte = prod['sku'] ?? 'N/A';
                             final int totalModelo = prod['stock_bodega'] ?? 0;

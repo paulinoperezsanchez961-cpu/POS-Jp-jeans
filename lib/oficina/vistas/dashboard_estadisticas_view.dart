@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'dart:convert';
-import '../../services/api_service.dart';
+import '../../services/api_service.dart'; // 🚨 Eliminamos el import de dart:convert
 
 class DashboardEstadisticasView extends StatefulWidget {
   const DashboardEstadisticasView({super.key});
@@ -13,9 +12,9 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
   bool _cargando = true;
   bool _generandoReporte = false;
   
-  int _diasFiltro = 7; 
+  int _diasFiltro = 1; 
 
-  // Métricas Financieras
+  // Métricas Financieras Exactas
   double _ingresosReales = 0.0;
   double _gastosReales = 0.0;
   double _gastosFijosCalculados = 0.0;
@@ -23,13 +22,13 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
   double _totalTarjeta = 0.0;
   double _totalTransferencia = 0.0;
 
-  // Métricas Operativas
+  // Métricas Operativas Exactas
   int _piezasVendidas = 0;
   int _totalApartados = 0;
   int _totalCambios = 0;
   int _stockBodegaActual = 0;
 
-  // Análisis de Tiempo y Rendimiento
+  // Análisis de Rendimiento
   Map<String, int> _ventasPorVendedor = {};
   Map<String, int> _tallasVendidas = {};
   Map<String, int> _productosMasVendidos = {};
@@ -42,112 +41,152 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
     _cargarMetricasRigurosas();
   }
 
+  String _formatearFechaBD(DateTime fecha) {
+    return '${fecha.year}-${fecha.month.toString().padLeft(2, '0')}-${fecha.day.toString().padLeft(2, '0')}';
+  }
+
   Future<void> _cargarMetricasRigurosas() async {
     setState(() => _cargando = true);
     
     try {
+      DateTime hoy = DateTime.now();
+      String fFin = _formatearFechaBD(hoy);
+      String fInicio; // 🚨 Ya no es opcional (?), siempre tendrá valor
+      
+      if (_diasFiltro == 1) {
+        fInicio = fFin; 
+      } else if (_diasFiltro > 1) {
+        fInicio = _formatearFechaBD(hoy.subtract(Duration(days: _diasFiltro - 1)));
+      } else {
+        fInicio = '2000-01-01'; 
+        fFin = '2100-01-01';
+      }
+
+      final ventas = await ApiService.obtenerVentasEnVivo(fechaInicio: fInicio, fechaFin: fFin);
       final cortes = await ApiService.obtenerHistorialCortes();
       final fijos = await ApiService.obtenerGastosFijos();
       final inventario = await ApiService.obtenerInventario();
       
-      // Contadores Financieros y Operativos
-      double sumVentas = 0, sumGastos = 0, sumEf = 0, sumTar = 0, sumTrans = 0;
+      double sumIngresosBrutos = 0, sumGastosComisiones = 0, sumGastosCortes = 0;
+      double sumEf = 0, sumTar = 0, sumTrans = 0;
       int sumPiezas = 0, sumApartados = 0, sumCambios = 0, stockTotal = 0;
       
-      // Mapas de Análisis
       Map<String, int> mapVendedores = {};
       Map<String, int> mapTallas = {};
       Map<String, int> mapProductos = {};
       Map<String, double> mapDias = {};
       Map<String, double> mapHoras = {};
 
-      final diasSemana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
-      DateTime hoy = DateTime.now();
-
-      // 1. Calcular Stock Actual Total
       for (var p in inventario) {
         stockTotal += int.tryParse(p['stock_bodega'].toString()) ?? 0;
       }
 
-      // 2. Analizar Cortes de Caja (Linea por Linea)
+      for (var v in ventas) {
+        double monto = double.tryParse(v['monto'].toString()) ?? 0;
+        String metodo = v['metodo_pago'] ?? 'Efectivo';
+        String tipo = v['tipo'] ?? '';
+        String desc = v['descripcion'] ?? '';
+        int cant = int.tryParse(v['cantidad'].toString()) ?? 0;
+        String fechaFmt = v['fecha_fmt'] ?? ''; 
+        String horaFmt = v['hora_fmt'] ?? '';   
+
+        if (monto > 0) {
+          sumIngresosBrutos += monto;
+          
+          try {
+            var partes = fechaFmt.split('/');
+            if (partes.length == 3) {
+              DateTime d = DateTime(int.parse(partes[2]), int.parse(partes[1]), int.parse(partes[0]));
+              final diasSemana = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+              String diaStr = diasSemana[d.weekday - 1];
+              mapDias[diaStr] = (mapDias[diaStr] ?? 0) + monto;
+            }
+          } catch(e) {
+            debugPrint('Aviso fecha: $e'); // 🚨 Solución de linter (empty catch)
+          }
+
+          try {
+             String horaCorta = '${horaFmt.split(':')[0]} ${horaFmt.split(' ')[1]}';
+             mapHoras[horaCorta] = (mapHoras[horaCorta] ?? 0) + monto;
+          } catch(e) {
+            debugPrint('Aviso hora: $e'); // 🚨 Solución de linter (empty catch)
+          }
+        } 
+        else if (monto < 0) {
+          sumGastosComisiones += monto.abs();
+        }
+
+        if (metodo.contains('Tarjeta')) {
+          sumTar += monto;
+        } else if (metodo.contains('Transferencia')) {
+          sumTrans += monto;
+        } else {
+          sumEf += monto; 
+        }
+
+        if (tipo == 'VENTA_POS' || tipo == 'ENGANCHE_APARTADO') {
+          sumPiezas += cant;
+          
+          String vendedor = "Mostrador";
+          if (desc.contains('| Vendedor:')) {
+            String despuesVendedor = desc.split('| Vendedor:')[1];
+            vendedor = despuesVendedor.split('|')[0].trim();
+          }
+          mapVendedores[vendedor] = (mapVendedores[vendedor] ?? 0) + cant;
+
+          RegExp extractor = RegExp(r'(\d+)x\s*\[SKU:\s*(.*?)\]\s*(.*?)\s*\((?:Talla|Talla:)\s*(.*?)\)');
+          var matches = extractor.allMatches(desc);
+          for (var m in matches) {
+            int q = int.tryParse(m.group(1) ?? '1') ?? 1;
+            String sku = m.group(2) ?? 'SD';
+            String nom = m.group(3)?.trim() ?? '';
+            String talla = m.group(4) ?? 'UNICA';
+            String llaveProducto = "$sku - $nom";
+
+            mapTallas[talla] = (mapTallas[talla] ?? 0) + q;
+            mapProductos[llaveProducto] = (mapProductos[llaveProducto] ?? 0) + q;
+          }
+        } else if (tipo == 'CAMBIO_FISICO') {
+          sumCambios++;
+        }
+
+        if (tipo == 'ENGANCHE_APARTADO') {
+          sumApartados++;
+        }
+      }
+
       for (var c in cortes) {
         DateTime? fechaCorte;
         try {
           if (c['fecha_corte'] != null) {
             fechaCorte = DateTime.parse(c['fecha_corte'].toString());
           }
-        } catch(e) { 
-          debugPrint('Aviso al parsear fecha del corte: $e'); 
+        } catch(e) {
+          debugPrint('Aviso parseo corte: $e'); // 🚨 Solución de linter (empty catch)
         }
 
         if (fechaCorte != null) {
-          int diferenciaDias = hoy.difference(fechaCorte).inDays;
-          
-          if (_diasFiltro == -1 || diferenciaDias <= _diasFiltro) {
-            double ventasDelCorte = double.tryParse(c['ventas_totales'].toString()) ?? 0;
-            
-            sumVentas += ventasDelCorte;
-            sumGastos += double.tryParse(c['gastos_totales'].toString()) ?? 0;
-            sumEf += double.tryParse(c['ventas_efectivo']?.toString() ?? '0') ?? 0;
-            sumTar += double.tryParse(c['ventas_tarjeta']?.toString() ?? '0') ?? 0;
-            sumTrans += double.tryParse(c['ventas_transferencia']?.toString() ?? '0') ?? 0;
+          String fechaCorteDB = _formatearFechaBD(fechaCorte);
+          bool enRango = false;
 
-            // Análisis de Tiempo (Mejor Día y Hora basados en Volumen de Venta)
-            String diaStr = diasSemana[fechaCorte.weekday - 1];
-            String horaStr = "${fechaCorte.hour.toString().padLeft(2, '0')}:00 hrs";
-            mapDias[diaStr] = (mapDias[diaStr] ?? 0) + ventasDelCorte;
-            mapHoras[horaStr] = (mapHoras[horaStr] ?? 0) + ventasDelCorte;
-
-            // Extraer JSON de Detalles Riguroso
-            Map<String, dynamic> jsonDetalles = {};
-            try { 
-              jsonDetalles = jsonDecode(c['detalles'] ?? '{}'); 
-            } catch(e) {
-              debugPrint('Aviso JSON de detalles: $e');
+          // 🚨 Ya no revisamos fInicio != null porque siempre tiene un valor
+          if (_diasFiltro == -1) {
+            enRango = true;
+          } else {
+            if (fechaCorteDB.compareTo(fInicio) >= 0 && fechaCorteDB.compareTo(fFin) <= 0) {
+              enRango = true;
             }
+          }
 
-            List items = jsonDetalles['items'] ?? [];
-            List apartados = jsonDetalles['apartados'] ?? [];
-            List cambios = jsonDetalles['cambios'] ?? [];
-
-            sumApartados += apartados.length;
-            sumCambios += cambios.length;
-
-            // Analizador profundo de tickets
-            for (var item in items) {
-              int cantidadGral = int.tryParse(item['cantidad']?.toString() ?? '1') ?? 1;
-              sumPiezas += cantidadGral;
-
-              String stringTicket = item['nombre']?.toString() ?? '';
-              
-              // A. Separar Vendedor
-              String vendedor = "Mostrador";
-              if (stringTicket.contains('| Vendedor:')) {
-                vendedor = stringTicket.split('| Vendedor:')[1].trim();
-              }
-              mapVendedores[vendedor] = (mapVendedores[vendedor] ?? 0) + cantidadGral;
-
-              // B. Extraer Tallas y SKUs con Expresiones Regulares
-              RegExp extractor = RegExp(r'(\d+)x\s*\[SKU:\s*(.*?)\]\s*(.*?)\s*\(Talla:\s*(.*?)\)');
-              var matches = extractor.allMatches(stringTicket);
-              
-              for (var m in matches) {
-                int cantidadPieza = int.tryParse(m.group(1) ?? '1') ?? 1;
-                String skuProd = m.group(2) ?? 'SD';
-                String nombreCorto = m.group(3)?.trim() ?? '';
-                String tallaPieza = m.group(4) ?? 'UNICA';
-
-                String llaveProducto = "$skuProd - $nombreCorto";
-
-                mapTallas[tallaPieza] = (mapTallas[tallaPieza] ?? 0) + cantidadPieza;
-                mapProductos[llaveProducto] = (mapProductos[llaveProducto] ?? 0) + cantidadPieza;
-              }
-            }
+          if (enRango) {
+            double g = double.tryParse(c['gastos_totales'].toString()) ?? 0;
+            sumGastosCortes += g;
           }
         }
       }
-
-      // 3. Proporción de Gastos Fijos
+      
+      sumEf -= sumGastosCortes;
+      
       double sumFijosSemanales = 0;
       for(var f in fijos) { sumFijosSemanales += double.tryParse(f['monto'].toString()) ?? 0; }
 
@@ -155,19 +194,9 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
       if (_diasFiltro > 0) {
         fijosCalculados = (sumFijosSemanales / 7.0) * _diasFiltro;
       } else {
-        if (cortes.isNotEmpty) {
-          try {
-            DateTime primerCorte = DateTime.parse(cortes.last['fecha_corte'].toString());
-            int diasTotales = hoy.difference(primerCorte).inDays;
-            if (diasTotales < 1) diasTotales = 1;
-            fijosCalculados = (sumFijosSemanales / 7.0) * diasTotales;
-          } catch(e) {
-            debugPrint('Aviso cálculo gastos: $e');
-          }
-        }
+        fijosCalculados = (sumFijosSemanales / 7.0) * mapDias.length; 
       }
 
-      // Determinar Mejor Día y Hora
       String mDia = "N/A"; double maxVentaDia = 0;
       mapDias.forEach((key, value) { if(value > maxVentaDia) { maxVentaDia = value; mDia = key; } });
       
@@ -176,20 +205,22 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
 
       if (mounted) {
         setState(() {
-          _ingresosReales = sumVentas;
-          _gastosReales = sumGastos;
+          _ingresosReales = sumIngresosBrutos;
+          _gastosReales = sumGastosCortes + sumGastosComisiones;
           _gastosFijosCalculados = fijosCalculados;
+          
           _totalEfectivo = sumEf;
           _totalTarjeta = sumTar;
           _totalTransferencia = sumTrans;
+          
           _piezasVendidas = sumPiezas;
           _totalApartados = sumApartados;
           _totalCambios = sumCambios;
           _stockBodegaActual = stockTotal;
+          
           _mejorDia = mDia;
           _mejorHora = mHora;
           
-          // Ordenar mapas de mayor a menor venta
           _ventasPorVendedor = Map.fromEntries(mapVendedores.entries.toList()..sort((a, b) => b.value.compareTo(a.value)));
           _tallasVendidas = Map.fromEntries(mapTallas.entries.toList()..sort((a, b) => b.value.compareTo(a.value)));
           _productosMasVendidos = Map.fromEntries(mapProductos.entries.toList()..sort((a, b) => b.value.compareTo(a.value)));
@@ -282,7 +313,7 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
                     children: [
                       Text('PANEL DE CONTROL AVANZADO', style: TextStyle(fontSize: isMobile ? 20 : 24, fontWeight: FontWeight.w300, letterSpacing: 3)),
                       const SizedBox(height: 4),
-                      const Text('Auditoría rigurosa de flujo de efectivo, stock y rendimiento.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                      const Text('Auditoría rigurosa y exacta del flujo de efectivo, stock y rendimiento.', style: TextStyle(color: Colors.grey, fontSize: 12)),
                     ],
                   ),
                   Row(
@@ -295,8 +326,8 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
                           value: _diasFiltro,
                           underline: const SizedBox(),
                           items: const [
-                            DropdownMenuItem(value: 1, child: Text('Último Día (Hoy)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
-                            DropdownMenuItem(value: 7, child: Text('Última Semana (7D)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
+                            DropdownMenuItem(value: 1, child: Text('Solo Hoy (1D)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
+                            DropdownMenuItem(value: 7, child: Text('Últimos 7 Días', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
                             DropdownMenuItem(value: 30, child: Text('Último Mes (30D)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
                             DropdownMenuItem(value: -1, child: Text('Histórico Completo', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
                           ],
@@ -328,7 +359,7 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
                 physics: const NeverScrollableScrollPhysics(),
                 children: [
                   _buildMetricCard('INGRESOS BRUTOS', '\$${_ingresosReales.toStringAsFixed(2)}', Colors.black, Colors.grey.shade100, Icons.trending_up, isHero: true),
-                  _buildMetricCard('EFECTIVO', '\$${_totalEfectivo.toStringAsFixed(2)}', Colors.green.shade700, Colors.white, Icons.money),
+                  _buildMetricCard('EFECTIVO FÍSICO', '\$${_totalEfectivo.toStringAsFixed(2)}', Colors.green.shade700, Colors.white, Icons.money),
                   _buildMetricCard('TARJETA (MP)', '\$${_totalTarjeta.toStringAsFixed(2)}', Colors.blue.shade700, Colors.white, Icons.credit_card),
                   _buildMetricCard('TRANSFERENCIA', '\$${_totalTransferencia.toStringAsFixed(2)}', Colors.purple.shade700, Colors.white, Icons.account_balance),
                   _buildMetricCard('UTILIDAD NETA', '\$${neto.toStringAsFixed(2)}', Colors.indigo.shade800, Colors.indigo.shade50, Icons.verified, isHero: true),
