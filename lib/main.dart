@@ -1,16 +1,34 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 // 🚨 IMPORTAMOS LOS MÓDULOS SEPARADOS Y EL API SERVICE
 import 'oficina/modulo_oficina.dart';
 import 'pos/modulo_pos.dart';
-import 'services/api_service.dart'; // IMPORTANTE: Asegúrate de tener este archivo con tu baseUrl
+import 'services/api_service.dart'; 
 
 void main() {
+  // 🚨 Garantiza que los puentes nativos de iOS/Android/Windows estén listos
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const JPJeansApp());
 }
 
+// ============================================================================
+// 🖱️ MOTOR DE SCROLL CROSS-PLATFORM (VITAL PARA WINDOWS Y WEB)
+// ============================================================================
+class AppScrollBehavior extends MaterialScrollBehavior {
+  @override
+  Set<PointerDeviceKind> get dragDevices => {
+        PointerDeviceKind.touch,      // Dedos en iOS/Android
+        PointerDeviceKind.mouse,      // Mouse en Windows
+        PointerDeviceKind.trackpad,   // Trackpad en Mac/Laptops
+      };
+}
+
+// ============================================================================
+// 🎨 TEMA GLOBAL SOFISTICADO (MATERIAL 3)
+// ============================================================================
 class JPJeansApp extends StatelessWidget {
   const JPJeansApp({super.key});
 
@@ -19,18 +37,46 @@ class JPJeansApp extends StatelessWidget {
     return MaterialApp(
       title: 'JP Jeans POS',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData.light().copyWith(
-        scaffoldBackgroundColor: Colors.white,
-        colorScheme: const ColorScheme.light(
+      scrollBehavior: AppScrollBehavior(), // Inyectamos el scroll universal
+      theme: ThemeData(
+        useMaterial3: true, 
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.black,
           primary: Colors.black,
-          secondary: Colors.white,
-          surface: Color(0xFFF9F9F9),
+          surface: const Color(0xFFF6F8FA), // Fondo premium estilo Dashboard
         ),
+        scaffoldBackgroundColor: const Color(0xFFF6F8FA),
         appBarTheme: const AppBarTheme(
           backgroundColor: Colors.white,
           foregroundColor: Colors.black,
           elevation: 0,
+          scrolledUnderElevation: 1, // Sombra sutil estilo iOS al hacer scroll
+          centerTitle: true,
         ),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            elevation: 0,
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        ),
+        outlinedButtonTheme: OutlinedButtonThemeData(
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            side: const BorderSide(color: Colors.black12),
+          ),
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: Colors.white,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Colors.black12)),
+          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Colors.black12)),
+          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Colors.black, width: 1.5)),
+          labelStyle: const TextStyle(color: Colors.grey, fontSize: 13),
+        ),
+        // 🚨 Bloque de CardTheme eliminado para evitar conflictos con el SDK
       ),
       home: const LoginScreen(),
     );
@@ -38,7 +84,7 @@ class JPJeansApp extends StatelessWidget {
 }
 
 // ============================================================================
-// 1. EL GUARDIA DE SEGURIDAD (LOGIN 100% REAL CON BASE DE DATOS)
+// 1. EL GUARDIA DE SEGURIDAD (LOGIN OPTIMIZADO PARA TECLADOS MÓVILES)
 // ============================================================================
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -64,7 +110,6 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
     
     try {
-      // 1. Intentamos entrar como ADMINISTRADOR DE OFICINA
       var resOficina = await http.post(
         Uri.parse('${ApiService.baseUrl}/oficina/login'),
         headers: {"Content-Type": "application/json"},
@@ -74,12 +119,10 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
 
       if (resOficina.statusCode == 200) {
-        // Credenciales de Director Correctas
         Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const CentroDeControlAdmin()));
         return;
       }
 
-      // 2. Si no es admin, intentamos entrar como CAJERO POS
       var resCajero = await http.post(
         Uri.parse('${ApiService.baseUrl}/pos/login'),
         headers: {"Content-Type": "application/json"},
@@ -89,12 +132,10 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
 
       if (resCajero.statusCode == 200) {
-        // Credenciales de Cajero Correctas
         Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const MostradorCajero()));
         return;
       }
 
-      // 3. Si ambos fallan, el usuario no existe o la clave está mal
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('❌ Credenciales incorrectas o usuario inactivo'), backgroundColor: Colors.red));
 
     } catch (e) {
@@ -111,58 +152,75 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Center(
-        child: Container(
-          width: 380,
-          padding: const EdgeInsets.all(40),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            border: Border.all(color: Colors.black12),
-            borderRadius: BorderRadius.circular(8),
-            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 20, spreadRadius: 5)],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Image.asset(
-                'assets/logo.png',
-                width: 100,
-                height: 100,
-                fit: BoxFit.contain,
-                errorBuilder: (context, error, stackTrace) {
-                  return const Text('JP', style: TextStyle(fontSize: 40, fontWeight: FontWeight.bold));
-                },
+      backgroundColor: Colors.white,
+      // 🚨 SafeArea e Inyección de Scroll evitan que el teclado de iOS/Android rompa la pantalla
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24.0),
+            child: Container(
+              width: 380,
+              padding: const EdgeInsets.all(40),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 24, spreadRadius: 8, offset: const Offset(0, 10))],
               ),
-              const SizedBox(height: 10),
-              const Text('JP Jeans', style: TextStyle(fontSize: 32, fontWeight: FontWeight.w300, letterSpacing: 2)),
-              const Text('SISTEMA CENTRAL', style: TextStyle(fontSize: 10, color: Colors.grey, letterSpacing: 3)),
-              const SizedBox(height: 40),
-              TextField(
-                controller: _userController,
-                decoration: const InputDecoration(labelText: 'Usuario', border: OutlineInputBorder(), prefixIcon: Icon(Icons.person_outline)),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Image.asset(
+                    'assets/logo.png',
+                    width: 90,
+                    height: 90,
+                    fit: BoxFit.contain,
+                    errorBuilder: (context, error, stackTrace) {
+                      return const Text('JP', style: TextStyle(fontSize: 40, fontWeight: FontWeight.bold));
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  const Text('JP Jeans', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w300, letterSpacing: 2)),
+                  const Text('SISTEMA CENTRAL', style: TextStyle(fontSize: 10, color: Colors.grey, letterSpacing: 3, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 40),
+                  TextField(
+                    controller: _userController,
+                    keyboardType: TextInputType.text,
+                    textInputAction: TextInputAction.next,
+                    decoration: const InputDecoration(labelText: 'Usuario', prefixIcon: Icon(Icons.person_outline)),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _passController,
+                    obscureText: true,
+                    textInputAction: TextInputAction.done,
+                    decoration: const InputDecoration(labelText: 'Contraseña', prefixIcon: Icon(Icons.lock_outline)),
+                    onSubmitted: (_) => _login(), 
+                  ),
+                  const SizedBox(height: 30),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 55,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white),
+                      onPressed: _isLoading ? null : _login,
+                      child: _isLoading 
+                        ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
+                        : const Text('ACCEDER AL SISTEMA', style: TextStyle(letterSpacing: 1.5, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.shield_outlined, size: 14, color: Colors.green),
+                      SizedBox(width: 6),
+                      Text('Conexión encriptada con BD Central', style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.w500)),
+                    ],
+                  ),
+                ],
               ),
-              const SizedBox(height: 20),
-              TextField(
-                controller: _passController,
-                obscureText: true,
-                decoration: const InputDecoration(labelText: 'Contraseña', border: OutlineInputBorder(), prefixIcon: Icon(Icons.lock_outline)),
-                onSubmitted: (_) => _login(), 
-              ),
-              const SizedBox(height: 30),
-              SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white),
-                  onPressed: _isLoading ? null : _login,
-                  child: _isLoading 
-                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                    : const Text('ACCEDER', style: TextStyle(letterSpacing: 2, fontWeight: FontWeight.bold)),
-                ),
-              ),
-              const SizedBox(height: 20),
-              const Text('Conexión encriptada con BD Central', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, color: Colors.grey)),
-            ],
+            ),
           ),
         ),
       ),
@@ -191,13 +249,16 @@ class CentroDeControlAdmin extends StatelessWidget {
             labelColor: Colors.black,
             unselectedLabelColor: Colors.grey,
             indicatorColor: Colors.black,
+            indicatorWeight: 3,
+            labelStyle: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1, fontSize: 12),
             tabs: [
-              Tab(text: 'MI CENTRO DE CONTROL'),
+              Tab(text: 'CENTRO DE CONTROL'),
               Tab(text: 'MOSTRADOR (CAJA)'),
             ],
           ),
         ),
         body: const TabBarView(
+          physics: NeverScrollableScrollPhysics(), // Evita cambiar de módulo por accidente al arrastrar
           children: [
             ModuloOficina(),
             ModuloPOS(),

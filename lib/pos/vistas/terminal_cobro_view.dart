@@ -56,21 +56,27 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     super.initState();
     _cargarCatalogoDesdeCerebro();
     _cargarCarritoMemoria();
+    
+    // 🚨 Aseguramos el foco inicial para el escáner bluetooth
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _buscadorFocus.requestFocus();
+    });
   }
 
   @override
   void dispose() {
     _mpPollingTimer?.cancel();
     _buscadorFocus.dispose();
+    _buscadorController.dispose();
+    _pagoController.dispose();
+    _cuponController.dispose();
     super.dispose();
   }
 
   Future<void> _cargarCatalogoDesdeCerebro() async {
     try {
       var res = await http.get(Uri.parse('${ApiService.baseUrl}/pos/catalogo'));
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
       if (res.statusCode == 200) {
         var data = jsonDecode(res.body);
         if (data['exito'] == true) {
@@ -156,6 +162,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cancelado o Error al abrir la cámara'), backgroundColor: Colors.orange));
+        _buscadorFocus.requestFocus();
       }
     }
   }
@@ -183,11 +190,15 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
           ),
         );
       }
-    );
+    ).then((_) {
+      // 🚨 Candado de Foco
+      _buscadorFocus.requestFocus();
+    });
   }
 
   void _agregarAlCarrito(String codigoOBusqueda) {
     if (codigoOBusqueda.isEmpty) {
+      _buscadorFocus.requestFocus();
       return;
     }
 
@@ -242,6 +253,9 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
       return;
     }
 
+    // 🚨 Confirmación sensorial para la cajera
+    HapticFeedback.lightImpact();
+
     setState(() {
       if (indexEnCarrito != -1) {
         carrito[indexEnCarrito]['cantidad'] += 1;
@@ -270,6 +284,38 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     });
   }
 
+  // 🚨 OPTIMIZACIÓN: Modificar cantidades en vivo con botones (+/-)
+  void _modificarCantidad(int index, int delta) {
+    setState(() {
+      int nuevaCant = carrito[index]['cantidad'] + delta;
+      if (nuevaCant <= 0) {
+        _quitarDelCarrito(index);
+      } else {
+        int stockDisponible = 0;
+        final pCatalogo = _catalogoReal.firstWhere((prod) => prod['id'] == carrito[index]['id'], orElse: () => null);
+        
+        if (pCatalogo != null) {
+          List<Map<String, dynamic>> tallasBD = parsearTallasBD(pCatalogo['tallas']);
+          if (tallasBD.isNotEmpty) {
+            final t = tallasBD.firstWhere((t) => t['talla'] == carrito[index]['talla'], orElse: () => {'cantidad': 0});
+            stockDisponible = t['cantidad'];
+          } else {
+            stockDisponible = int.tryParse(pCatalogo["stock_bodega"]?.toString() ?? '0') ?? 0;
+          }
+        }
+
+        if (nuevaCant > stockDisponible) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Límite de stock alcanzado'), backgroundColor: Colors.orange));
+        } else {
+          carrito[index]['cantidad'] = nuevaCant;
+          _recalcularTotal();
+          _guardarCarritoMemoria();
+        }
+      }
+    });
+    _buscadorFocus.requestFocus();
+  }
+
   void _quitarDelCarrito(int index) {
     setState(() {
       carrito.removeAt(index);
@@ -282,21 +328,20 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
       }
       _recalcularTotal();
       _guardarCarritoMemoria();
-      _buscadorFocus.requestFocus();
     });
+    _buscadorFocus.requestFocus();
   }
 
   Future<void> _aplicarCupon() async {
-    if (carrito.isEmpty) {
-      return;
-    }
+    if (carrito.isEmpty) return;
+    
     String codigoIngresado = _cuponController.text.trim().toUpperCase();
-
+    final sm = ScaffoldMessenger.of(context); // 🚨 Capturado para evitar linter
+    
     try {
       var res = await http.get(Uri.parse('${ApiService.baseUrl}/cupones/validar/$codigoIngresado'));
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
+      
       var data = jsonDecode(res.body);
 
       if (data['valido'] == true) {
@@ -305,20 +350,20 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
           _descuentoPorPieza = double.tryParse(data['descuento'].toString()) ?? 0.0;
           _recalcularTotal();
         });
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Código aplicado con éxito'), backgroundColor: Colors.green));
+        sm.showSnackBar(const SnackBar(content: Text('Código aplicado con éxito'), backgroundColor: Colors.green));
       } else {
         setState(() {
           _vendedorAsociado = "";
           _descuentoPorPieza = 0.0;
           _recalcularTotal();
         });
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Código inválido o inactivo'), backgroundColor: Colors.red));
+        sm.showSnackBar(const SnackBar(content: Text('Código inválido o inactivo'), backgroundColor: Colors.red));
       }
     } catch (e) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error al conectar con servidor'), backgroundColor: Colors.orange));
+      if (!mounted) return;
+      sm.showSnackBar(const SnackBar(content: Text('Error al conectar con servidor'), backgroundColor: Colors.orange));
+    } finally {
+      _buscadorFocus.requestFocus();
     }
   }
 
@@ -341,14 +386,13 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
   }
 
   Future<void> _iniciarCobroTerminalMP() async {
-    if (carrito.isEmpty || _procesandoCobro) {
-      return;
-    }
-    setState(() {
-      _procesandoCobro = true;
-    });
+    if (carrito.isEmpty || _procesandoCobro) return;
+    
+    setState(() => _procesandoCobro = true);
 
+    // 🚨 Variables locales capturadas para prevenir crasheos de Flutter
     final nav = Navigator.of(context, rootNavigator: true);
+    final sm = ScaffoldMessenger.of(context); 
 
     showDialog(
       context: context,
@@ -374,9 +418,8 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
           Uri.parse('${ApiService.baseUrl}/pos/mp/cobrar-terminal'),
           headers: {"Content-Type": "application/json"},
           body: jsonEncode({"total": _total}));
-      if (!mounted) {
-        return;
-      }
+          
+      if (!mounted) return;
 
       var data = jsonDecode(res.body);
 
@@ -386,6 +429,12 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         _mpPollingTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
           try {
             var statusRes = await http.get(Uri.parse('${ApiService.baseUrl}/pos/mp/estado-cobro/$intentId'));
+            
+            if (!mounted) {
+               timer.cancel();
+               return;
+            }
+            
             var statusData = jsonDecode(statusRes.body);
 
             if (statusData['exito'] == true) {
@@ -393,64 +442,52 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
 
               if (estado == 'FINISHED') {
                 timer.cancel();
-                if (!mounted) {
-                  return;
-                }
                 nav.pop();
                 _ejecutarCobroEImprimirTicket(metodo: "Tarjeta MP");
               } else if (estado == 'CANCELED' || estado == 'ERROR') {
                 timer.cancel();
-                if (!mounted) {
-                  return;
-                }
                 nav.pop();
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Pago cancelado o rechazado ($estado)'), backgroundColor: Colors.red));
-                setState(() {
-                  _procesandoCobro = false;
-                });
+                sm.showSnackBar(SnackBar(content: Text('Pago cancelado o rechazado ($estado)'), backgroundColor: Colors.red));
+                setState(() => _procesandoCobro = false);
+                _buscadorFocus.requestFocus();
               }
             }
           } catch (e) {
+            if (!mounted) { timer.cancel(); return; }
             timer.cancel();
-            if (!mounted) {
-              return;
-            }
             nav.pop();
-            setState(() {
-              _procesandoCobro = false;
-            });
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error al consultar estado de MP'), backgroundColor: Colors.red));
+            setState(() => _procesandoCobro = false);
+            sm.showSnackBar(const SnackBar(content: Text('Error al consultar estado de MP'), backgroundColor: Colors.red));
+            _buscadorFocus.requestFocus();
           }
         });
       } else {
         nav.pop();
-        setState(() {
-          _procesandoCobro = false;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(data['error'] ?? 'No se pudo conectar a la terminal'), backgroundColor: Colors.red));
+        setState(() => _procesandoCobro = false);
+        sm.showSnackBar(SnackBar(content: Text(data['error'] ?? 'No se pudo conectar a la terminal'), backgroundColor: Colors.red));
+        _buscadorFocus.requestFocus();
       }
     } catch (e) {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
       nav.pop();
-      setState(() {
-        _procesandoCobro = false;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error de red: $e'), backgroundColor: Colors.red));
+      setState(() => _procesandoCobro = false);
+      sm.showSnackBar(SnackBar(content: Text('Error de red: $e'), backgroundColor: Colors.red));
+      _buscadorFocus.requestFocus();
     }
   }
 
   Future<void> _ejecutarCobroEImprimirTicket({required String metodo}) async {
     double pago = (metodo == "Efectivo") ? (double.tryParse(_pagoController.text) ?? 0.0) : _total;
+    
+    final sm = ScaffoldMessenger.of(context); // 🚨 Protegemos el contexto
+
     if (metodo == "Efectivo" && pago < _total) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Falta dinero para cubrir el total'), backgroundColor: Colors.orange));
+      sm.showSnackBar(const SnackBar(content: Text('Falta dinero para cubrir el total'), backgroundColor: Colors.orange));
+      _buscadorFocus.requestFocus();
       return;
     }
 
-    setState(() {
-      _procesandoCobro = true;
-    });
+    setState(() => _procesandoCobro = true);
 
     List<Map<String, dynamic>> carritoAEnviar = carrito.map((item) {
       var mod = Map<String, dynamic>.from(item);
@@ -472,9 +509,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
             "codigo_creador": _vendedorAsociado
           }));
 
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
       var data = jsonDecode(res.body);
 
       if (data['exito'] == true) {
@@ -592,19 +627,18 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
 
         await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => await doc.save(), name: 'Ticket_JPJeans');
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('❌ Error BD: ${data['error']}'), backgroundColor: Colors.red));
+        sm.showSnackBar(SnackBar(content: Text('❌ Error BD: ${data['error']}'), backgroundColor: Colors.red));
       }
     } catch (e) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('❌ Error de red: $e'), backgroundColor: Colors.red));
+      if (!mounted) return;
+      sm.showSnackBar(SnackBar(content: Text('❌ Error de red: $e'), backgroundColor: Colors.red));
     } finally {
       if (mounted) {
         setState(() {
           _procesandoCobro = false;
         });
       }
+      // 🚨 Regresamos siempre el candado al buscador
       _buscadorFocus.requestFocus();
     }
   }
@@ -913,14 +947,25 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                                           children: [
                                             Text(item["sku"], style: const TextStyle(color: Colors.grey, fontSize: 10)),
                                             Container(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2), decoration: BoxDecoration(color: Colors.grey.shade200, borderRadius: BorderRadius.circular(4)), child: Text('Talla: ${item["talla"]}', style: const TextStyle(color: Colors.black, fontSize: 8, fontWeight: FontWeight.bold))),
-                                            Container(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2), decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(4)), child: Text('${item["cantidad"]}x', style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold))),
                                           ])
                                     ])),
-                                Column(
-                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                // 🚨 CONTROLES DE CANTIDAD (+ / -)
+                                Row(
+                                    mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      Text('\$${(item["precio"] * item["cantidad"]).toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                                      IconButton(icon: const Icon(Icons.close, color: Colors.red, size: 16), padding: EdgeInsets.zero, constraints: const BoxConstraints(), onPressed: () => _quitarDelCarrito(index))
+                                      IconButton(icon: const Icon(Icons.remove_circle_outline, color: Colors.grey), onPressed: () => _modificarCantidad(index, -1), padding: EdgeInsets.zero, constraints: const BoxConstraints()),
+                                      const SizedBox(width: 8),
+                                      Text('${item["cantidad"]}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                                      const SizedBox(width: 8),
+                                      IconButton(icon: const Icon(Icons.add_circle_outline, color: Colors.black), onPressed: () => _modificarCantidad(index, 1), padding: EdgeInsets.zero, constraints: const BoxConstraints()),
+                                      const SizedBox(width: 16),
+                                      Column(
+                                        crossAxisAlignment: CrossAxisAlignment.end,
+                                        children: [
+                                          Text('\$${(item["precio"] * item["cantidad"]).toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                                          IconButton(icon: const Icon(Icons.delete, color: Colors.red, size: 16), padding: EdgeInsets.zero, constraints: const BoxConstraints(), onPressed: () => _quitarDelCarrito(index))
+                                        ]
+                                      )
                                     ])
                               ]));
                     },

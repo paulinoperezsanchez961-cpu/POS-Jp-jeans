@@ -11,9 +11,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/api_service.dart';
 import '../utils/escaner_utils.dart';
 
-// ============================================================================
-// 🚨 VISTA 4: MÓDULO DE APARTADOS (TRANSFERENCIA, TELÉFONO Y COMISIONES)
-// ============================================================================
 class ApartadosView extends StatefulWidget {
   final Function(double) onVentaExitosa;
   const ApartadosView({super.key, required this.onVentaExitosa});
@@ -26,7 +23,7 @@ class _ApartadosViewState extends State<ApartadosView> {
   final TextEditingController _telefonoController = TextEditingController(); 
   final TextEditingController _buscadorController = TextEditingController();
   final TextEditingController _engancheController = TextEditingController();
-  final TextEditingController _cuponController = TextEditingController(); // 🚨 NUEVO
+  final TextEditingController _cuponController = TextEditingController(); 
   final FocusNode _buscadorFocus = FocusNode(); 
 
   final List<Map<String, dynamic>> _carritoApartado = [];
@@ -36,8 +33,8 @@ class _ApartadosViewState extends State<ApartadosView> {
   double _subtotalApartado = 0.0;
   double _descuentoAplicado = 0.0;
   double _totalApartado = 0.0;
-  String _vendedorAsociado = ""; // 🚨 NUEVO
-  double _descuentoPorPieza = 0.0; // 🚨 NUEVO
+  String _vendedorAsociado = ""; 
+  double _descuentoPorPieza = 0.0; 
 
   bool _procesando = false;
   String _metodoPagoNuevo = 'Efectivo';
@@ -48,6 +45,11 @@ class _ApartadosViewState extends State<ApartadosView> {
     super.initState();
     _cargarCatalogo();
     _cargarApartados();
+    
+    // 🚨 Aseguramos el foco inicial para el escáner bluetooth
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _buscadorFocus.requestFocus();
+    });
   }
 
   @override
@@ -71,8 +73,8 @@ class _ApartadosViewState extends State<ApartadosView> {
       if (res.statusCode == 200) {
         var data = jsonDecode(res.body);
         if (data['exito'] == true) {
-          setState(() {
-            _catalogoReal = data['productos'];
+          setState(() { 
+            _catalogoReal = data['productos']; 
           });
         }
       }
@@ -90,8 +92,8 @@ class _ApartadosViewState extends State<ApartadosView> {
       if (res.statusCode == 200) {
         var data = jsonDecode(res.body);
         if (data['exito'] == true) {
-          setState(() {
-            _apartadosActivos = data['apartados'];
+          setState(() { 
+            _apartadosActivos = data['apartados']; 
           });
         }
       }
@@ -120,7 +122,7 @@ class _ApartadosViewState extends State<ApartadosView> {
       context: context,
       builder: (BuildContext contextDialog) {
         return AlertDialog(
-          title: Text('Selecciona la talla de ${p['sku']}'),
+          title: Text('Selecciona la talla de ${p['sku']}', style: const TextStyle(fontWeight: FontWeight.bold)),
           content: Wrap(
             spacing: 10,
             runSpacing: 10,
@@ -138,11 +140,15 @@ class _ApartadosViewState extends State<ApartadosView> {
           ),
         );
       }
-    );
+    ).then((_) {
+      // 🚨 Candado de Foco
+      _buscadorFocus.requestFocus();
+    });
   }
 
   void _agregarPrenda(String codigo) {
     if (codigo.isEmpty) {
+      _buscadorFocus.requestFocus();
       return;
     }
     
@@ -175,17 +181,37 @@ class _ApartadosViewState extends State<ApartadosView> {
 
   void _ejecutarAgregarPrenda(Map<String, dynamic> p, String tallaEncontradaLimpia, List<Map<String, dynamic>> tallasBD) {
     String tallaRealVisual = "ÚNICA";
+    int stockDisponible = 0; 
+
     for (var t in tallasBD) {
       if (sanitizarAlfanumerico(t['talla'].toString()) == tallaEncontradaLimpia) {
+        stockDisponible = t['cantidad'];
         tallaRealVisual = t['talla'].toString();
         break;
       }
     }
 
+    if (stockDisponible == 0 && tallasBD.isEmpty) {
+      stockDisponible = int.tryParse(p["stock_bodega"]?.toString() ?? '0') ?? 0;
+    }
+
+    int indexEnCarrito = _carritoApartado.indexWhere((item) => item['id'] == p['id'] && item['talla'] == tallaRealVisual);
+    int cantidadActual = indexEnCarrito != -1 ? _carritoApartado[indexEnCarrito]['cantidad'] : 0;
+
+    // 🚨 VALIDACIÓN ESTRICTA: Evita robos o alteraciones del stock en apartados
+    if (stockDisponible <= cantidadActual) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Sin stock suficiente de la talla $tallaRealVisual'), backgroundColor: Colors.orange));
+      _buscadorController.clear();
+      _buscadorFocus.requestFocus();
+      return;
+    }
+
+    // 🚨 Confirmación sensorial para la cajera
+    HapticFeedback.lightImpact();
+
     setState(() {
-      int index = _carritoApartado.indexWhere((item) => item['id'] == p['id'] && item['talla'] == tallaRealVisual);
-      if (index != -1) {
-        _carritoApartado[index]['cantidad'] += 1;
+      if (indexEnCarrito != -1) {
+        _carritoApartado[indexEnCarrito]['cantidad'] += 1;
       } else {
         double precio = double.tryParse((p["en_rebaja"] == 1 ? p["precio_rebaja"] : p["precio_venta"]).toString()) ?? 0.0;
         _carritoApartado.add({
@@ -196,6 +222,37 @@ class _ApartadosViewState extends State<ApartadosView> {
       _buscadorController.clear();
       _buscadorFocus.requestFocus(); 
     });
+  }
+
+  // 🚨 OPTIMIZACIÓN: Modificar cantidades en vivo con botones (+/-)
+  void _modificarCantidad(int index, int delta) {
+    setState(() {
+      int nuevaCant = _carritoApartado[index]['cantidad'] + delta;
+      if (nuevaCant <= 0) {
+        _quitarDelCarrito(index);
+      } else {
+        int stockDisponible = 0;
+        final pCatalogo = _catalogoReal.firstWhere((prod) => prod['id'] == _carritoApartado[index]['id'], orElse: () => null);
+        
+        if (pCatalogo != null) {
+          List<Map<String, dynamic>> tallasBD = parsearTallasBD(pCatalogo['tallas']);
+          if (tallasBD.isNotEmpty) {
+            final t = tallasBD.firstWhere((t) => t['talla'] == _carritoApartado[index]['talla'], orElse: () => {'cantidad': 0});
+            stockDisponible = t['cantidad'];
+          } else {
+            stockDisponible = int.tryParse(pCatalogo["stock_bodega"]?.toString() ?? '0') ?? 0;
+          }
+        }
+
+        if (nuevaCant > stockDisponible) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Límite de stock alcanzado'), backgroundColor: Colors.orange));
+        } else {
+          _carritoApartado[index]['cantidad'] = nuevaCant;
+          _calcularTotal();
+        }
+      }
+    });
+    _buscadorFocus.requestFocus();
   }
 
   void _quitarDelCarrito(int index) {
@@ -213,18 +270,31 @@ class _ApartadosViewState extends State<ApartadosView> {
     });
   }
 
-  // 🚨 NUEVA FUNCIÓN: VALIDAR CUPÓN/VENDEDOR
   Future<void> _aplicarCupon() async {
     if (_carritoApartado.isEmpty) {
       return;
     }
+    
     String codigoIngresado = _cuponController.text.trim().toUpperCase();
+    final sm = ScaffoldMessenger.of(context); // 🚨 Capturado para evitar linter
+
+    if (codigoIngresado.isEmpty) {
+        setState(() {
+          _vendedorAsociado = "";
+          _descuentoPorPieza = 0.0;
+          _calcularTotal();
+        });
+        sm.showSnackBar(const SnackBar(content: Text('Vendedor / Cupón removido'), backgroundColor: Colors.blue));
+        _buscadorFocus.requestFocus();
+        return;
+    }
 
     try {
       var res = await http.get(Uri.parse('${ApiService.baseUrl}/cupones/validar/$codigoIngresado'));
       if (!mounted) {
         return;
       }
+
       var data = jsonDecode(res.body);
 
       if (data['valido'] == true) {
@@ -233,20 +303,22 @@ class _ApartadosViewState extends State<ApartadosView> {
           _descuentoPorPieza = double.tryParse(data['descuento'].toString()) ?? 0.0;
           _calcularTotal();
         });
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Código aplicado con éxito'), backgroundColor: Colors.green));
+        sm.showSnackBar(const SnackBar(content: Text('Código aplicado con éxito'), backgroundColor: Colors.green));
       } else {
         setState(() {
           _vendedorAsociado = "";
           _descuentoPorPieza = 0.0;
           _calcularTotal();
         });
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Código inválido o inactivo'), backgroundColor: Colors.red));
+        sm.showSnackBar(const SnackBar(content: Text('Código inválido o inactivo'), backgroundColor: Colors.red));
       }
     } catch (e) {
       if (!mounted) {
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error al conectar con servidor'), backgroundColor: Colors.orange));
+      sm.showSnackBar(const SnackBar(content: Text('Error al conectar con servidor'), backgroundColor: Colors.orange));
+    } finally {
+      _buscadorFocus.requestFocus();
     }
   }
 
@@ -256,7 +328,7 @@ class _ApartadosViewState extends State<ApartadosView> {
     _subtotalApartado = _carritoApartado.fold(0, (sum, item) => sum + (item["precio"] * item["cantidad"]));
     _totalApartado = _subtotalApartado - _descuentoAplicado;
     if (_totalApartado < 0) {
-      _totalApartado = 0;
+      _totalApartado = 0.0;
     }
   }
 
@@ -266,21 +338,26 @@ class _ApartadosViewState extends State<ApartadosView> {
     });
 
     final nav = Navigator.of(context, rootNavigator: true);
+    final sm = ScaffoldMessenger.of(context);
 
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (BuildContext contextDialog) {
-        return AlertDialog(
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: const [
-              CircularProgressIndicator(color: Colors.blue),
-              SizedBox(height: 20),
-              Text("Conectando con la terminal...", style: TextStyle(fontWeight: FontWeight.bold)),
-              SizedBox(height: 10),
-              Text("Por favor, pídele al cliente que acerque su tarjeta.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey, fontSize: 12)),
-            ],
+        // 🚨 BLINDAJE IOS: PopScope evita que el gesto de "atrás" rompa el cobro
+        return PopScope(
+          canPop: false,
+          child: AlertDialog(
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: const [
+                CircularProgressIndicator(color: Colors.blue),
+                SizedBox(height: 20),
+                Text("Conectando con la terminal...", style: TextStyle(fontWeight: FontWeight.bold)),
+                SizedBox(height: 10),
+                Text("Por favor, pídele al cliente que acerque su tarjeta.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey, fontSize: 12)),
+              ],
+            ),
           ),
         );
       },
@@ -296,7 +373,7 @@ class _ApartadosViewState extends State<ApartadosView> {
       if (!mounted) {
         return;
       }
-      
+
       var data = jsonDecode(res.body);
       
       if (data['exito'] == true && data['intent_id'] != null) {
@@ -305,6 +382,10 @@ class _ApartadosViewState extends State<ApartadosView> {
         _mpPollingTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
           try {
             var statusRes = await http.get(Uri.parse('${ApiService.baseUrl}/pos/mp/estado-cobro/$intentId'));
+            if (!mounted) {
+              timer.cancel();
+              return;
+            }
             var statusData = jsonDecode(statusRes.body);
             
             if (statusData['exito'] == true) {
@@ -312,9 +393,6 @@ class _ApartadosViewState extends State<ApartadosView> {
               
               if (estado == 'FINISHED') {
                 timer.cancel();
-                if (!mounted) {
-                  return;
-                }
                 nav.pop(); 
                 
                 if (tipoMovimiento == 'NUEVO') {
@@ -325,14 +403,12 @@ class _ApartadosViewState extends State<ApartadosView> {
 
               } else if (estado == 'CANCELED' || estado == 'ERROR') {
                 timer.cancel();
-                if (!mounted) {
-                  return;
-                }
                 nav.pop();
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Pago cancelado o rechazado ($estado)'), backgroundColor: Colors.red));
+                sm.showSnackBar(SnackBar(content: Text('Pago cancelado o rechazado ($estado)'), backgroundColor: Colors.red));
                 setState(() {
                   _procesando = false;
                 });
+                _buscadorFocus.requestFocus();
               }
             }
           } catch(e) {
@@ -344,7 +420,8 @@ class _ApartadosViewState extends State<ApartadosView> {
              setState(() {
                _procesando = false;
              });
-             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Error al consultar estado de MP'), backgroundColor: Colors.red));
+             sm.showSnackBar(const SnackBar(content: Text('Error al consultar estado de MP'), backgroundColor: Colors.red));
+             _buscadorFocus.requestFocus();
           }
         });
 
@@ -353,7 +430,8 @@ class _ApartadosViewState extends State<ApartadosView> {
         setState(() {
           _procesando = false;
         });
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(data['error'] ?? 'No se pudo conectar a la terminal'), backgroundColor: Colors.red));
+        sm.showSnackBar(SnackBar(content: Text(data['error'] ?? 'No se pudo conectar a la terminal'), backgroundColor: Colors.red));
+        _buscadorFocus.requestFocus();
       }
     } catch (e) {
       if (!mounted) {
@@ -363,18 +441,31 @@ class _ApartadosViewState extends State<ApartadosView> {
       setState(() {
         _procesando = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error de red: $e'), backgroundColor: Colors.red));
+      sm.showSnackBar(SnackBar(content: Text('Error de red: $e'), backgroundColor: Colors.red));
+      _buscadorFocus.requestFocus();
     }
   }
 
   Future<void> _crearApartadoEImprimir() async {
+    final sm = ScaffoldMessenger.of(context);
+
     if (_clienteController.text.isEmpty || _carritoApartado.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Falta el nombre del cliente o productos'), backgroundColor: Colors.orange));
+      sm.showSnackBar(const SnackBar(content: Text('Falta el nombre del cliente o productos'), backgroundColor: Colors.orange));
+      _buscadorFocus.requestFocus();
       return;
     }
     double enganche = double.tryParse(_engancheController.text) ?? 0.0;
-    if (enganche <= 0 || enganche > _totalApartado) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Monto de enganche inválido'), backgroundColor: Colors.orange));
+    
+    // 🚨 BLOQUEO: Si el cliente liquida al instante, debe usar la caja normal
+    if (enganche >= _totalApartado) {
+      sm.showSnackBar(const SnackBar(content: Text('Si el cliente paga el total, cóbralo en la pestaña de CAJA.'), backgroundColor: Colors.redAccent));
+      _buscadorFocus.requestFocus();
+      return;
+    }
+
+    if (enganche <= 0) {
+      sm.showSnackBar(const SnackBar(content: Text('Monto de enganche inválido'), backgroundColor: Colors.orange));
+      _buscadorFocus.requestFocus();
       return;
     }
 
@@ -427,10 +518,10 @@ class _ApartadosViewState extends State<ApartadosView> {
       if (!mounted) {
         return;
       }
-      
+
       var data = jsonDecode(res.body);
-      if (data['exito'] == true || res.statusCode == 404) {
-        
+      
+      if (data['exito'] == true) {
         String descuentoTxt = _vendedorAsociado.isNotEmpty ? "Desc. ($_vendedorAsociado): -\$${_descuentoAplicado.toStringAsFixed(2)}" : "";
 
         await _imprimirTicketApartado(
@@ -449,9 +540,7 @@ class _ApartadosViewState extends State<ApartadosView> {
         }
 
         widget.onVentaExitosa(enganche);
-        
         String resumenPrendas = carritoAEnviar.map((item) => "${item['cantidad']}x [SKU: ${item['sku']}] ${item['nombre']}").join(", ");
-        
         await _registrarMovimientoApartado('NUEVO APARTADO', "$nombreFinalCliente ($resumenPrendas)", enganche, metodoPagoVerificado);
 
         setState(() {
@@ -479,6 +568,7 @@ class _ApartadosViewState extends State<ApartadosView> {
           _procesando = false;
         });
       }
+      _buscadorFocus.requestFocus();
     }
   }
 
@@ -486,7 +576,6 @@ class _ApartadosViewState extends State<ApartadosView> {
     setState(() {
       _procesando = true;
     });
-    
     final sm = ScaffoldMessenger.of(context); 
 
     try {
@@ -535,13 +624,13 @@ class _ApartadosViewState extends State<ApartadosView> {
           _procesando = false;
         });
       }
+      _buscadorFocus.requestFocus();
     }
   }
 
   void _abrirDialogoLiquidarOAbonar(Map<String, dynamic> apartado) {
     double restaAnterior = double.tryParse(apartado['resta'].toString()) ?? 0.0;
     TextEditingController pagoController = TextEditingController();
-    
     String metodoPagoAbono = 'Efectivo';
 
     showDialog(
@@ -554,18 +643,29 @@ class _ApartadosViewState extends State<ApartadosView> {
           double nuevaResta = esLiquidacion ? 0.0 : (restaAnterior - pago);
 
           return AlertDialog(
-            title: Text('Cobrar - ${apartado['cliente'].toString().split('|')[0].trim()}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Text('Cobrar a ${apartado['cliente'].toString().split('|')[0].trim()}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Resta actual: \$${restaAnterior.toStringAsFixed(2)}', style: const TextStyle(fontSize: 18, color: Colors.red, fontWeight: FontWeight.bold)),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(8)),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Resta actual:', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+                      Text('\$${restaAnterior.toStringAsFixed(2)}', style: const TextStyle(fontSize: 18, color: Colors.red, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ),
                 const SizedBox(height: 20),
                 TextField(
                   controller: pagoController,
                   keyboardType: TextInputType.number,
                   onChanged: (val) => setStateDialog(() {}),
-                  decoration: const InputDecoration(labelText: 'Dinero que entrega el cliente (\$)', border: OutlineInputBorder(), prefixIcon: Icon(Icons.attach_money)),
+                  decoration: const InputDecoration(labelText: 'Dinero que entrega el cliente (\$)', border: OutlineInputBorder(), prefixIcon: Icon(Icons.attach_money), filled: true, fillColor: Color(0xFFF9F9F9)),
                 ),
                 const SizedBox(height: 15),
                 
@@ -633,10 +733,9 @@ class _ApartadosViewState extends State<ApartadosView> {
             actions: [
               TextButton(onPressed: () => Navigator.pop(contextDialog), child: const Text('Cancelar', style: TextStyle(color: Colors.grey))),
               ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: esLiquidacion ? Colors.black : Colors.orange, foregroundColor: Colors.white),
+                style: ElevatedButton.styleFrom(backgroundColor: esLiquidacion ? Colors.black : Colors.orange, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
                 onPressed: pago > 0 ? () async {
                   Navigator.pop(contextDialog);
-                  
                   double dineroParaCuenta = esLiquidacion ? restaAnterior : pago;
                   
                   if (metodoPagoAbono == 'Tarjeta MP') {
@@ -646,7 +745,6 @@ class _ApartadosViewState extends State<ApartadosView> {
                   } else {
                     _ejecutarAbonoOLiquidacion(dineroParaCuenta, esLiquidacion, apartado, "Efectivo", cambio, pago);
                   }
-
                 } : null,
                 child: Text(esLiquidacion ? 'COBRAR Y LIQUIDAR' : 'REGISTRAR ABONO'),
               )
@@ -654,7 +752,10 @@ class _ApartadosViewState extends State<ApartadosView> {
           );
         }
       )
-    );
+    ).then((_) {
+      // 🚨 Candado de Foco al salir del modal
+      _buscadorFocus.requestFocus();
+    });
   }
 
   Future<void> _imprimirTicketApartado(String titulo, String cliente, List<Map<String, dynamic>> carrito, double total, double pagoActual, double resta, {double cambio = 0.0, double pagoCliente = 0.0, String metodoPago = 'Efectivo', String descuentoTxt = ''}) async {
@@ -724,8 +825,8 @@ class _ApartadosViewState extends State<ApartadosView> {
     bool? conf = await showDialog(
       context: context,
       builder: (contextDialog) => AlertDialog(
-        title: const Text('¿Devolver al stock?'),
-        content: const Text('El cliente perderá el apartado y las prendas regresarán al inventario.'),
+        title: const Text('¿Devolver al stock?', style: TextStyle(color: Colors.red)),
+        content: const Text('El cliente perderá el apartado y las prendas regresarán al inventario de venta.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(contextDialog, false), child: const Text('Cancelar', style: TextStyle(color: Colors.grey))),
           ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white), onPressed: () => Navigator.pop(contextDialog, true), child: const Text('SÍ, DEVOLVER')),
@@ -745,7 +846,7 @@ class _ApartadosViewState extends State<ApartadosView> {
           return;
         }
         await _cargarApartados();
-        sm.showSnackBar(const SnackBar(content: Text('Prendas devueltas al stock'), backgroundColor: Colors.green)); 
+        sm.showSnackBar(const SnackBar(content: Text('Prendas devueltas al stock exitosamente'), backgroundColor: Colors.green)); 
       } catch(e) { 
         debugPrint('Aviso devolver stock: $e'); 
       } finally { 
@@ -756,114 +857,186 @@ class _ApartadosViewState extends State<ApartadosView> {
         }
       }
     }
+    // 🚨 Candado de Foco
+    _buscadorFocus.requestFocus();
   }
 
   @override
   Widget build(BuildContext context) {
     bool isMobile = MediaQuery.of(context).size.width < 800;
 
-    Widget formNuevo = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        TextField(controller: _clienteController, decoration: const InputDecoration(labelText: 'Nombre del Cliente', border: OutlineInputBorder(), prefixIcon: Icon(Icons.person))),
-        const SizedBox(height: 10),
-        TextField(controller: _telefonoController, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Teléfono (Opcional - Recordatorios)', border: OutlineInputBorder(), prefixIcon: Icon(Icons.phone))),
-        const SizedBox(height: 16),
-        TextField(controller: _buscadorController, focusNode: _buscadorFocus, decoration: InputDecoration(labelText: 'Escanear Código / QR', border: const OutlineInputBorder(), prefixIcon: const Icon(Icons.qr_code_scanner), suffixIcon: IconButton(icon: const Icon(Icons.search), onPressed: () => _agregarPrenda(_buscadorController.text))), onSubmitted: _agregarPrenda),
-        const SizedBox(height: 16),
-        Container(
-          constraints: const BoxConstraints(maxHeight: 200),
-          decoration: BoxDecoration(border: Border.all(color: Colors.black12), borderRadius: BorderRadius.circular(8)),
-          child: _carritoApartado.isEmpty 
-            ? const Center(child: Text('Escanea prendas para apartar', style: TextStyle(color: Colors.grey)))
-            : ListView.builder(
-                itemCount: _carritoApartado.length,
-                itemBuilder: (c, i) => ListTile(
-                  leading: Image.network(_carritoApartado[i]['foto_url'], width: 40, height: 40, fit: BoxFit.cover),
-                  title: Text('${_carritoApartado[i]['sku']} - ${_carritoApartado[i]['nombre']}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                  subtitle: Text('Talla: ${_carritoApartado[i]['talla']} | ${_carritoApartado[i]['cantidad']}x', style: const TextStyle(fontSize: 10)),
-                  trailing: IconButton(icon: const Icon(Icons.close, color: Colors.red, size: 16), onPressed: () => _quitarDelCarrito(i)),
+    // 🎨 UI OPTIMIZADA: Formulario Dinámico de Nuevo Apartado
+    Widget formNuevo = SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(color: Colors.white, border: Border.all(color: Colors.black12), borderRadius: BorderRadius.circular(12), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 10)]),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('DATOS DEL CLIENTE', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.grey, letterSpacing: 1)),
+                const SizedBox(height: 12),
+                TextField(controller: _clienteController, decoration: const InputDecoration(labelText: 'Nombre Completo', border: OutlineInputBorder(), prefixIcon: Icon(Icons.person), filled: true, fillColor: Color(0xFFF9F9F9))),
+                const SizedBox(height: 12),
+                TextField(controller: _telefonoController, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Teléfono (Opcional)', border: OutlineInputBorder(), prefixIcon: Icon(Icons.phone), filled: true, fillColor: Color(0xFFF9F9F9))),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+          
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(color: Colors.white, border: Border.all(color: Colors.black12), borderRadius: BorderRadius.circular(12), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 10)]),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('ESCANEAR PRENDAS', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.grey, letterSpacing: 1)),
+                const SizedBox(height: 12),
+                TextField(controller: _buscadorController, focusNode: _buscadorFocus, decoration: InputDecoration(labelText: 'Escanear Código / QR', border: const OutlineInputBorder(), prefixIcon: const Icon(Icons.qr_code_scanner), suffixIcon: IconButton(icon: const Icon(Icons.search), onPressed: () => _agregarPrenda(_buscadorController.text)), filled: true, fillColor: Color(0xFFF9F9F9)), onSubmitted: _agregarPrenda),
+                const SizedBox(height: 16),
+                
+                // 🚨 OPTIMIZACIÓN: shrinkWrap evita la cajita atrapada y hace un scroll natural en móviles
+                if (_carritoApartado.isEmpty)
+                  const Center(child: Padding(padding: EdgeInsets.symmetric(vertical: 20), child: Text('Escanea prendas para apartar', style: TextStyle(color: Colors.grey))))
+                else
+                  ListView.separated(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: _carritoApartado.length,
+                    separatorBuilder: (c, i) => const Divider(height: 1),
+                    itemBuilder: (c, i) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8.0),
+                      child: Row(
+                        children: [
+                          ClipRRect(borderRadius: BorderRadius.circular(6), child: Image.network(_carritoApartado[i]['foto_url'], width: 45, height: 45, fit: BoxFit.cover)),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('${_carritoApartado[i]['sku']} - ${_carritoApartado[i]['nombre']}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                                Text('Talla: ${_carritoApartado[i]['talla']}  |  Precio: \$${_carritoApartado[i]['precio']}', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                              ],
+                            ),
+                          ),
+                          // 🚨 CONTROLES DE CANTIDAD (+ / -)
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(icon: const Icon(Icons.remove_circle_outline, color: Colors.grey), onPressed: () => _modificarCantidad(i, -1), padding: EdgeInsets.zero, constraints: const BoxConstraints()),
+                              const SizedBox(width: 8),
+                              Text('${_carritoApartado[i]['cantidad']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                              const SizedBox(width: 8),
+                              IconButton(icon: const Icon(Icons.add_circle_outline, color: Colors.black), onPressed: () => _modificarCantidad(i, 1), padding: EdgeInsets.zero, constraints: const BoxConstraints()),
+                              const SizedBox(width: 16),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  Text('\$${(_carritoApartado[i]['precio'] * _carritoApartado[i]['cantidad']).toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                                  IconButton(icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20), padding: EdgeInsets.zero, constraints: const BoxConstraints(), onPressed: () => _quitarDelCarrito(i)),
+                                ]
+                              )
+                            ]
+                          )
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(color: Colors.white, border: Border.all(color: Colors.black12), borderRadius: BorderRadius.circular(12), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 10)]),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  Expanded(child: TextField(controller: _cuponController, decoration: const InputDecoration(isDense: true, labelText: 'Código Vendedor / Cupón', border: OutlineInputBorder(), prefixIcon: Icon(Icons.local_offer_outlined, size: 18)))),
+                  const SizedBox(width: 10),
+                  ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))), onPressed: _aplicarCupon, child: const Text('APLICAR'))
+                ]),
+                const SizedBox(height: 20),
+
+                if (_descuentoAplicado > 0) ...[
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                    const Text('Subtotal', style: TextStyle(color: Colors.grey)),
+                    Text('\$${_subtotalApartado.toStringAsFixed(2)}', style: const TextStyle(color: Colors.grey))
+                  ]),
+                  const SizedBox(height: 5),
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                    Text('Descuento: $_vendedorAsociado', style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 12)),
+                    Text('-\$${_descuentoAplicado.toStringAsFixed(2)}', style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold))
+                  ]),
+                  const Divider(height: 20)
+                ],
+
+                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('TOTAL A PAGAR:', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black54)), Text('\$${_totalApartado.toStringAsFixed(2)}', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w900))]),
+                const SizedBox(height: 20),
+                
+                TextField(controller: _engancheController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Monto de Enganche Físico (\$)', border: OutlineInputBorder(), prefixIcon: Icon(Icons.payments_outlined), filled: true, fillColor: Color(0xFFF0FDF4))),
+                const SizedBox(height: 15),
+                
+                const Text('MÉTODO DE PAGO:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          backgroundColor: _metodoPagoNuevo == 'Efectivo' ? Colors.green.shade50 : Colors.transparent,
+                          side: BorderSide(color: _metodoPagoNuevo == 'Efectivo' ? Colors.green : Colors.grey.shade300),
+                          padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))
+                        ),
+                        icon: Icon(Icons.money, color: _metodoPagoNuevo == 'Efectivo' ? Colors.green : Colors.grey, size: 16),
+                        label: Text('EFECT.', style: TextStyle(color: _metodoPagoNuevo == 'Efectivo' ? Colors.green : Colors.grey, fontWeight: FontWeight.bold, fontSize: 11)),
+                        onPressed: () => setState(() => _metodoPagoNuevo = 'Efectivo'),
+                      )
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          backgroundColor: _metodoPagoNuevo == 'Tarjeta MP' ? Colors.blue.shade50 : Colors.transparent,
+                          side: BorderSide(color: _metodoPagoNuevo == 'Tarjeta MP' ? Colors.blue : Colors.grey.shade300),
+                          padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))
+                        ),
+                        icon: Icon(Icons.credit_card, color: _metodoPagoNuevo == 'Tarjeta MP' ? Colors.blue : Colors.grey, size: 16),
+                        label: Text('TARJETA', style: TextStyle(color: _metodoPagoNuevo == 'Tarjeta MP' ? Colors.blue : Colors.grey, fontWeight: FontWeight.bold, fontSize: 11)),
+                        onPressed: () => setState(() => _metodoPagoNuevo = 'Tarjeta MP'),
+                      )
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          backgroundColor: _metodoPagoNuevo == 'Transferencia' ? Colors.purple.shade50 : Colors.transparent,
+                          side: BorderSide(color: _metodoPagoNuevo == 'Transferencia' ? Colors.purple : Colors.grey.shade300),
+                          padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))
+                        ),
+                        icon: Icon(Icons.account_balance, color: _metodoPagoNuevo == 'Transferencia' ? Colors.purple : Colors.grey, size: 16),
+                        label: Text('TRANSF.', style: TextStyle(color: _metodoPagoNuevo == 'Transferencia' ? Colors.purple : Colors.grey, fontWeight: FontWeight.bold, fontSize: 11)),
+                        onPressed: () => setState(() => _metodoPagoNuevo = 'Transferencia'),
+                      )
+                    )
+                  ],
                 ),
-              ),
-        ),
-        const SizedBox(height: 16),
-
-        // 🚨 SECCIÓN DE CÓDIGO CREADOR
-        Row(children: [
-          Expanded(child: TextField(controller: _cuponController, decoration: const InputDecoration(isDense: true, labelText: 'Código Creador / Vendedor', border: OutlineInputBorder(), prefixIcon: Icon(Icons.local_offer_outlined, size: 18)))),
-          const SizedBox(width: 10),
-          ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white), onPressed: _aplicarCupon, child: const Text('APLICAR'))
-        ]),
-        const SizedBox(height: 20),
-
-        if (_descuentoAplicado > 0) ...[
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            const Text('Subtotal', style: TextStyle(color: Colors.grey)),
-            Text('\$${_subtotalApartado.toStringAsFixed(2)}', style: const TextStyle(color: Colors.grey))
-          ]),
-          const SizedBox(height: 5),
-          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-            Text('Código: $_vendedorAsociado', style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 12)),
-            Text('-\$${_descuentoAplicado.toStringAsFixed(2)}', style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold))
-          ]),
-          const Divider(height: 20)
+                
+                const SizedBox(height: 24),
+                SizedBox(width: double.infinity, height: 55, child: ElevatedButton.icon(style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))), icon: _procesando ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Icon(Icons.receipt_long), label: const Text('GUARDAR E IMPRIMIR APARTADO', style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1)), onPressed: _procesando ? null : _crearApartadoEImprimir)),
+              ],
+            ),
+          ),
+          const SizedBox(height: 30),
         ],
-
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('TOTAL:', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)), Text('\$${_totalApartado.toStringAsFixed(2)}', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900))]),
-        const SizedBox(height: 16),
-        TextField(controller: _engancheController, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Monto que deja (\$)', border: OutlineInputBorder(), prefixIcon: Icon(Icons.attach_money), filled: true, fillColor: Color(0xFFF9F9F9))),
-        const SizedBox(height: 15),
-        
-        const Text('MÉTODO DE PAGO:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  backgroundColor: _metodoPagoNuevo == 'Efectivo' ? Colors.green.shade50 : Colors.transparent,
-                  side: BorderSide(color: _metodoPagoNuevo == 'Efectivo' ? Colors.green : Colors.grey.shade400),
-                  padding: const EdgeInsets.symmetric(vertical: 14)
-                ),
-                icon: Icon(Icons.money, color: _metodoPagoNuevo == 'Efectivo' ? Colors.green : Colors.grey, size: 18),
-                label: Text('EFECT.', style: TextStyle(color: _metodoPagoNuevo == 'Efectivo' ? Colors.green : Colors.grey, fontWeight: FontWeight.bold, fontSize: 11)),
-                onPressed: () => setState(() => _metodoPagoNuevo = 'Efectivo'),
-              )
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  backgroundColor: _metodoPagoNuevo == 'Tarjeta MP' ? Colors.blue.shade50 : Colors.transparent,
-                  side: BorderSide(color: _metodoPagoNuevo == 'Tarjeta MP' ? Colors.blue : Colors.grey.shade400),
-                  padding: const EdgeInsets.symmetric(vertical: 14)
-                ),
-                icon: Icon(Icons.credit_card, color: _metodoPagoNuevo == 'Tarjeta MP' ? Colors.blue : Colors.grey, size: 18),
-                label: Text('TARJETA', style: TextStyle(color: _metodoPagoNuevo == 'Tarjeta MP' ? Colors.blue : Colors.grey, fontWeight: FontWeight.bold, fontSize: 11)),
-                onPressed: () => setState(() => _metodoPagoNuevo = 'Tarjeta MP'),
-              )
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(
-                  backgroundColor: _metodoPagoNuevo == 'Transferencia' ? Colors.purple.shade50 : Colors.transparent,
-                  side: BorderSide(color: _metodoPagoNuevo == 'Transferencia' ? Colors.purple : Colors.grey.shade400),
-                  padding: const EdgeInsets.symmetric(vertical: 14)
-                ),
-                icon: Icon(Icons.account_balance, color: _metodoPagoNuevo == 'Transferencia' ? Colors.purple : Colors.grey, size: 18),
-                label: Text('TRANSF.', style: TextStyle(color: _metodoPagoNuevo == 'Transferencia' ? Colors.purple : Colors.grey, fontWeight: FontWeight.bold, fontSize: 11)),
-                onPressed: () => setState(() => _metodoPagoNuevo = 'Transferencia'),
-              )
-            )
-          ],
-        ),
-        
-        const SizedBox(height: 20),
-        SizedBox(width: double.infinity, height: 50, child: ElevatedButton.icon(style: ElevatedButton.styleFrom(backgroundColor: Colors.black, foregroundColor: Colors.white), icon: _procesando ? const CircularProgressIndicator(color: Colors.white) : const Icon(Icons.print), label: const Text('GUARDAR E IMPRIMIR APARTADO'), onPressed: _procesando ? null : _crearApartadoEImprimir)),
-      ],
+      ),
     );
 
+    // 🎨 UI OPTIMIZADA: Gestión de Activos con Barras de Progreso
     Widget listaActivos = _apartadosActivos.isEmpty 
       ? const Center(child: Text("No hay apartados activos", style: TextStyle(color: Colors.grey)))
       : ListView.builder(
@@ -871,35 +1044,102 @@ class _ApartadosViewState extends State<ApartadosView> {
           itemBuilder: (c, i) {
             final apt = _apartadosActivos[i];
             
-            // Recortar la vista del cliente para no mostrar el Teléfono ni el Vendedor completo si es muy largo
             String vistaCliente = apt['cliente']?.toString() ?? 'Cliente';
+            String vendedorBadge = "";
             if (vistaCliente.contains(' | Vendedor:')) {
-              vistaCliente = vistaCliente.split(' | Vendedor:')[0];
+              var partes = vistaCliente.split(' | Vendedor:');
+              vistaCliente = partes[0].trim();
+              vendedorBadge = partes[1].trim();
             }
 
+            // 🚨 CÁLCULO DE PROGRESO VISUAL
+            double total = double.tryParse(apt['total'].toString()) ?? 0.0;
+            double resta = double.tryParse(apt['resta'].toString()) ?? 0.0;
+            double pagado = total - resta;
+            double porcentaje = total > 0 ? (pagado / total) : 0.0;
+
             return Card(
-              margin: const EdgeInsets.only(bottom: 12),
-              shape: RoundedRectangleBorder(side: const BorderSide(color: Colors.black12), borderRadius: BorderRadius.circular(8)),
+              elevation: 0,
+              margin: const EdgeInsets.only(bottom: 16),
+              shape: RoundedRectangleBorder(side: BorderSide(color: Colors.grey.shade200), borderRadius: BorderRadius.circular(12)),
               child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Row(
+                padding: const EdgeInsets.all(20.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(vistaCliente, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                          Text(apt['descripcion_prendas']?.toString() ?? 'Prendas varias', style: const TextStyle(color: Colors.grey, fontSize: 12)),
-                          const SizedBox(height: 8),
-                          Text('Resta: \$${apt['resta']}', style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 14)),
-                        ],
-                      ),
-                    ),
-                    Column(
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white), onPressed: () => _abrirDialogoLiquidarOAbonar(apt), child: const Text('COBRAR')),
-                        const SizedBox(height: 8),
-                        OutlinedButton(style: OutlinedButton.styleFrom(foregroundColor: Colors.red, side: const BorderSide(color: Colors.red)), onPressed: () => _devolverAStock(apt['id'].toString()), child: const Text('DEVOLVER')),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  const Icon(Icons.account_circle, size: 18, color: Colors.grey),
+                                  const SizedBox(width: 8),
+                                  Expanded(child: Text(vistaCliente, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16), overflow: TextOverflow.ellipsis)),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              if (vendedorBadge.isNotEmpty)
+                                Container(margin: const EdgeInsets.only(bottom: 6), padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(4), border: Border.all(color: Colors.blue.shade100)), child: Text('Vendedor: $vendedorBadge', style: TextStyle(fontSize: 9, color: Colors.blue.shade800, fontWeight: FontWeight.bold))),
+                              Text(apt['descripcion_prendas']?.toString() ?? 'Prendas varias', style: const TextStyle(color: Colors.black54, fontSize: 12, height: 1.4)),
+                            ],
+                          ),
+                        ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            const Text('FALTA POR PAGAR', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.grey)),
+                            Text('\$${apt['resta']}', style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w900, fontSize: 20)),
+                          ],
+                        )
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    // 🚨 BARRA DE PROGRESO DE PAGO
+                    Row(
+                      children: [
+                        Text('\$${pagado.toStringAsFixed(0)}', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.green)),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: LinearProgressIndicator(
+                              value: porcentaje,
+                              minHeight: 8,
+                              backgroundColor: Colors.grey.shade200,
+                              color: porcentaje > 0.7 ? Colors.green : Colors.blue,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text('\$${total.toStringAsFixed(0)}', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.black54)),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(foregroundColor: Colors.redAccent, side: const BorderSide(color: Colors.redAccent, width: 1.5), padding: const EdgeInsets.symmetric(vertical: 12), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                            icon: const Icon(Icons.assignment_return_outlined, size: 16),
+                            label: const Text('DEVOLVER A STOCK', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                            onPressed: () => _devolverAStock(apt['id'].toString())
+                          )
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          flex: 2,
+                          child: ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(backgroundColor: Colors.green.shade700, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 12), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                            icon: const Icon(Icons.payments_outlined, size: 16),
+                            label: const Text('INGRESAR ABONO / COBRAR', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11)),
+                            onPressed: () => _abrirDialogoLiquidarOAbonar(apt)
+                          )
+                        ),
                       ],
                     )
                   ],
@@ -911,20 +1151,33 @@ class _ApartadosViewState extends State<ApartadosView> {
 
     return DefaultTabController(
       length: 2,
-      child: Padding(
-        padding: EdgeInsets.all(isMobile ? 16.0 : 32.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('SISTEMA DE APARTADOS', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w300, letterSpacing: 3)),
-            const SizedBox(height: 20),
-            const TabBar(labelColor: Colors.black, unselectedLabelColor: Colors.grey, indicatorColor: Colors.black, tabs: [Tab(text: 'NUEVO APARTADO'), Tab(text: 'GESTIONAR ACTIVOS')]),
-            const SizedBox(height: 20),
-            Expanded(child: TabBarView(children: [
-              SingleChildScrollView(child: Container(padding: const EdgeInsets.all(20), decoration: BoxDecoration(border: Border.all(color: Colors.black12), borderRadius: BorderRadius.circular(8)), child: formNuevo)),
-              listaActivos
-            ]))
-          ],
+      child: Container(
+        color: const Color(0xFFF6F8FA),
+        child: Padding(
+          padding: EdgeInsets.all(isMobile ? 16.0 : 32.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('SISTEMA DE APARTADOS', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, letterSpacing: 1.5, color: Colors.black87)),
+              const SizedBox(height: 20),
+              TabBar(
+                labelColor: Colors.black, 
+                unselectedLabelColor: Colors.grey, 
+                indicatorColor: Colors.black, 
+                labelStyle: const TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1),
+                tabs: const [Tab(text: 'NUEVO APARTADO'), Tab(text: 'GESTIONAR ACTIVOS')]
+              ),
+              const SizedBox(height: 20),
+              Expanded(
+                child: TabBarView(
+                  children: [
+                    formNuevo,
+                    listaActivos
+                  ]
+                )
+              )
+            ],
+          ),
         ),
       ),
     );

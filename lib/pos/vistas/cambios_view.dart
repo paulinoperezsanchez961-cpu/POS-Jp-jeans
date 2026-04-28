@@ -35,26 +35,39 @@ class _CambiosViewState extends State<CambiosView> {
   void initState() {
     super.initState();
     _cargarCatalogoDesdeCerebro();
+    
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _entraFocus.requestFocus();
+    });
   }
   
   @override
   void dispose() {
     _entraFocus.dispose();
     _saleFocus.dispose();
+    _entraController.dispose();
+    _saleController.dispose();
+    _motivoController.dispose();
     super.dispose();
   }
 
   Future<void> _cargarCatalogoDesdeCerebro() async {
     try {
       var res = await http.get(Uri.parse('${ApiService.baseUrl}/pos/catalogo'));
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       if (res.statusCode == 200) {
         var data = jsonDecode(res.body);
         if (data['exito'] == true) {
-          setState(() => _catalogoReal = data['productos']);
+          setState(() {
+            _catalogoReal = data['productos'];
+          });
         }
       }
-    } catch(e) { debugPrint('Aviso catalogo: $e'); }
+    } catch(e) {
+      debugPrint('Aviso catalogo: $e');
+    }
   }
 
   Future<void> _registrarCambioEnMemoria() async {
@@ -89,7 +102,14 @@ class _CambiosViewState extends State<CambiosView> {
         }
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cancelado o Error al abrir la cámara'), backgroundColor: Colors.orange));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cancelado o Error al abrir la cámara'), backgroundColor: Colors.orange));
+        if (esEntrada) {
+          _entraFocus.requestFocus();
+        } else {
+          _saleFocus.requestFocus();
+        }
+      }
     }
   }
 
@@ -116,11 +136,24 @@ class _CambiosViewState extends State<CambiosView> {
           ),
         );
       }
-    );
+    ).then((_) {
+      if (esEntrada) {
+        _entraFocus.requestFocus();
+      } else {
+        _saleFocus.requestFocus();
+      }
+    });
   }
 
   void _agregarArticulo(String codigo, bool esEntrada) {
-    if (codigo.isEmpty) return;
+    if (codigo.isEmpty) {
+      if (esEntrada) {
+        _entraFocus.requestFocus();
+      } else {
+        _saleFocus.requestFocus();
+      }
+      return;
+    }
     
     final datosEscaneo = decodificarEscaneo(codigo);
     String skuLimpio = datosEscaneo['sku']!;
@@ -144,19 +177,43 @@ class _CambiosViewState extends State<CambiosView> {
       _ejecutarAgregarArticulo(p, tallaLimpia, tallasBD, esEntrada);
     } else {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Producto no encontrado'), backgroundColor: Colors.red));
-      if (esEntrada) { _entraController.clear(); _entraFocus.requestFocus(); }
-      else { _saleController.clear(); _saleFocus.requestFocus(); }
+      if (esEntrada) {
+        _entraController.clear();
+        _entraFocus.requestFocus();
+      } else {
+        _saleController.clear();
+        _saleFocus.requestFocus();
+      }
     }
   }
 
   void _ejecutarAgregarArticulo(Map<String, dynamic> p, String tallaEncontradaLimpia, List<Map<String, dynamic>> tallasBD, bool esEntrada) {
     String tallaRealVisual = "ÚNICA";
+    int stockDisponible = 0;
+
     for (var t in tallasBD) {
       if (sanitizarAlfanumerico(t['talla'].toString()) == tallaEncontradaLimpia) {
         tallaRealVisual = t['talla'].toString();
+        stockDisponible = t['cantidad'];
         break;
       }
     }
+
+    if (stockDisponible == 0 && tallasBD.isEmpty) {
+      stockDisponible = int.tryParse(p["stock_bodega"]?.toString() ?? '0') ?? 0;
+    }
+
+    if (!esEntrada) {
+      int cantidadActual = _articulosSalen.where((item) => item['id'] == p['id'] && item['talla_seleccionada'] == tallaRealVisual).length;
+      if (stockDisponible <= cantidadActual) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Sin stock suficiente de la talla $tallaRealVisual'), backgroundColor: Colors.orange));
+        _saleController.clear(); 
+        _saleFocus.requestFocus();
+        return;
+      }
+    }
+
+    HapticFeedback.lightImpact();
 
     setState(() {
       var itemNuevo = Map<String, dynamic>.from(p);
@@ -166,8 +223,7 @@ class _CambiosViewState extends State<CambiosView> {
         _articulosEntran.add(itemNuevo); 
         _entraController.clear(); 
         _entraFocus.requestFocus(); 
-      } 
-      else { 
+      } else { 
         _articulosSalen.add(itemNuevo); 
         _saleController.clear(); 
         _saleFocus.requestFocus(); 
@@ -182,18 +238,25 @@ class _CambiosViewState extends State<CambiosView> {
     }
 
     final sm = ScaffoldMessenger.of(context); 
-    setState(() => _procesando = true);
+    setState(() {
+      _procesando = true;
+    });
 
     try {
-      // 🚨 Manda la señal al servidor para que actualice los stocks físicos
       bool exito = await ApiService.procesarCambioFisico(_articulosEntran, _articulosSalen, _motivoController.text.trim());
       
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       if (exito) {
         final doc = pw.Document();
         pw.MemoryImage? imageLogo;
-        try { imageLogo = pw.MemoryImage((await rootBundle.load('assets/logo.png')).buffer.asUint8List()); } catch (e) { debugPrint('Aviso Logo: $e'); }
+        try {
+          imageLogo = pw.MemoryImage((await rootBundle.load('assets/logo.png')).buffer.asUint8List());
+        } catch (e) {
+          debugPrint('Aviso Logo: $e');
+        }
         
         final now = DateTime.now();
         final fechaHora = '${now.day}/${now.month}/${now.year} ${now.hour}:${now.minute}';
@@ -232,9 +295,11 @@ class _CambiosViewState extends State<CambiosView> {
         );
         
         await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => doc.save(), name: 'Cambio_JPJeans');
-        if (!mounted) return;
+        
+        if (!mounted) {
+          return;
+        }
 
-        // 🚨 Guarda en la memoria para que salga en el ticket del Corte de Caja
         await _registrarCambioEnMemoria();
 
         sm.showSnackBar(const SnackBar(content: Text('Cambio registrado en BD e impreso exitosamente.'), backgroundColor: Colors.green));
@@ -248,10 +313,17 @@ class _CambiosViewState extends State<CambiosView> {
         sm.showSnackBar(const SnackBar(content: Text('Error al procesar. Verifica que haya stock de la prenda que sale.'), backgroundColor: Colors.red));
       }
     } catch(e) {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       sm.showSnackBar(const SnackBar(content: Text('Error al procesar el cambio de red.'), backgroundColor: Colors.red));
     } finally {
-      if (mounted) setState(() => _procesando = false);
+      if (mounted) {
+        setState(() {
+          _procesando = false;
+        });
+      }
+      _entraFocus.requestFocus();
     }
   }
 
@@ -288,7 +360,21 @@ class _CambiosViewState extends State<CambiosView> {
           const SizedBox(height: 10),
           Container(
             constraints: const BoxConstraints(maxHeight: 150),
-            child: ListView.builder(shrinkWrap: true, itemCount: _articulosEntran.length, itemBuilder: (context, i) => ListTile(contentPadding: EdgeInsets.zero, title: Text(_articulosEntran[i]['nombre'], style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)), subtitle: Text('${_articulosEntran[i]['sku']} [Talla: ${_articulosEntran[i]['talla_seleccionada']}]'), trailing: IconButton(icon: const Icon(Icons.close, color: Colors.red, size: 16), onPressed: () => setState(() => _articulosEntran.removeAt(i))))),
+            child: ListView.builder(
+              shrinkWrap: true, 
+              itemCount: _articulosEntran.length, 
+              itemBuilder: (context, i) => ListTile(
+                contentPadding: EdgeInsets.zero, 
+                title: Text(_articulosEntran[i]['nombre'], style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)), 
+                subtitle: Text('${_articulosEntran[i]['sku']} [Talla: ${_articulosEntran[i]['talla_seleccionada']}]'), 
+                trailing: IconButton(icon: const Icon(Icons.close, color: Colors.red, size: 16), onPressed: () { 
+                  setState(() {
+                    _articulosEntran.removeAt(i);
+                  });
+                  _entraFocus.requestFocus();
+                })
+              )
+            ),
           )
         ],
       ),
@@ -323,7 +409,21 @@ class _CambiosViewState extends State<CambiosView> {
           const SizedBox(height: 10),
           Container(
             constraints: const BoxConstraints(maxHeight: 150),
-            child: ListView.builder(shrinkWrap: true, itemCount: _articulosSalen.length, itemBuilder: (context, i) => ListTile(contentPadding: EdgeInsets.zero, title: Text(_articulosSalen[i]['nombre'], style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)), subtitle: Text('${_articulosSalen[i]['sku']} [Talla: ${_articulosSalen[i]['talla_seleccionada']}]'), trailing: IconButton(icon: const Icon(Icons.close, color: Colors.red, size: 16), onPressed: () => setState(() => _articulosSalen.removeAt(i))))),
+            child: ListView.builder(
+              shrinkWrap: true, 
+              itemCount: _articulosSalen.length, 
+              itemBuilder: (context, i) => ListTile(
+                contentPadding: EdgeInsets.zero, 
+                title: Text(_articulosSalen[i]['nombre'], style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)), 
+                subtitle: Text('${_articulosSalen[i]['sku']} [Talla: ${_articulosSalen[i]['talla_seleccionada']}]'), 
+                trailing: IconButton(icon: const Icon(Icons.close, color: Colors.red, size: 16), onPressed: () {
+                  setState(() {
+                    _articulosSalen.removeAt(i);
+                  });
+                  _saleFocus.requestFocus();
+                })
+              )
+            ),
           )
         ],
       ),

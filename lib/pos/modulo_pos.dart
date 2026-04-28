@@ -9,7 +9,7 @@ import 'vistas/apartados_view.dart';
 import 'vistas/boveda_qr_view.dart';
 import 'vistas/envios_web_view.dart';
 import 'vistas/inventario_stock_view.dart';
-import 'vistas/promotores_vendedores_view.dart'; // 🚨 NUEVA IMPORTACIÓN
+import 'vistas/promotores_vendedores_view.dart';
 
 // ============================================================================
 // MÓDULO MAESTRO: PUNTO DE VENTA (POS)
@@ -52,18 +52,18 @@ class _ModuloPOSState extends State<ModuloPOS> {
   void _cerrarCajaYLimpiar() async {
     final prefs = await SharedPreferences.getInstance();
     
-    // Memorias originales
     await prefs.remove('caja_ventas');
     await prefs.remove('caja_gastos');
     await prefs.remove('caja_carrito'); 
     await prefs.remove('caja_lista_gastos'); 
-    
-    // Memorias del Mega Ticket
     await prefs.remove('caja_ventas_detalles');
     await prefs.remove('caja_apartados_detalles');
     await prefs.remove('caja_cambios_detalles');
     
-    setState(() { ventasDelDia = 0.0; gastosDelDia = 0.0; });
+    setState(() { 
+      ventasDelDia = 0.0; 
+      gastosDelDia = 0.0; 
+    });
   }
 
   void _cambiarPestana(int nuevaPestana) {
@@ -73,17 +73,6 @@ class _ModuloPOSState extends State<ModuloPOS> {
   @override
   Widget build(BuildContext context) {
     bool isMobile = MediaQuery.of(context).size.width < 800;
-
-    final List<Widget> vistas = [
-      TerminalCobroView(onVentaExitosa: (monto) => _actualizarTotalesDia(venta: monto), onCerrarCaja: _cerrarCajaYLimpiar, ventasTotales: ventasDelDia, gastosTotales: gastosDelDia),
-      const CambiosView(),      
-      RegistroGastosView(onGastoRegistrado: (monto) => _actualizarTotalesDia(gasto: monto)),
-      ApartadosView(onVentaExitosa: (monto) => _actualizarTotalesDia(venta: monto)),
-      BovedaQRView(onCerrar: () => _cambiarPestana(0)), 
-      const EnviosWebView(),    
-      const InventarioStockView(), 
-      const PromotoresVendedoresView(), // 🚨 NUEVA PANTALLA AGREGADA A LA LISTA
-    ];
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -105,7 +94,7 @@ class _ModuloPOSState extends State<ModuloPOS> {
           BottomNavigationBarItem(icon: Icon(Icons.qr_code_scanner_outlined, size: 20), label: 'QR'),
           BottomNavigationBarItem(icon: Icon(Icons.local_shipping_outlined, size: 20), label: 'ENVÍOS'),
           BottomNavigationBarItem(icon: Icon(Icons.inventory_2_outlined, size: 20), label: 'STOCK'),
-          BottomNavigationBarItem(icon: Icon(Icons.people_outline, size: 20), label: 'VENDEDORES'), // 🚨 NUEVO BOTÓN
+          BottomNavigationBarItem(icon: Icon(Icons.people_outline, size: 20), label: 'VENDEDORES'),
         ],
       ) : null,
       body: Row(
@@ -126,11 +115,32 @@ class _ModuloPOSState extends State<ModuloPOS> {
               NavigationRailDestination(icon: Icon(Icons.qr_code_scanner_outlined), label: Text('BÓVEDA QR')),
               NavigationRailDestination(icon: Icon(Icons.local_shipping_outlined), label: Text('ENVÍOS WEB')),
               NavigationRailDestination(icon: Icon(Icons.inventory_2_outlined), label: Text('STOCK')),
-              NavigationRailDestination(icon: Icon(Icons.people_outline), label: Text('VENDEDORES')), // 🚨 NUEVO BOTÓN
+              NavigationRailDestination(icon: Icon(Icons.people_outline), label: Text('VENDEDORES')),
             ],
           ),
           if (!isMobile) const VerticalDivider(thickness: 1, width: 1, color: Colors.black12),
-          Expanded(child: vistas[_index]),
+          Expanded(
+            // 🚨 OPTIMIZACIÓN CRÍTICA: IndexedStack preserva el estado de las pantallas.
+            // Esto evita que se borre el carrito si la cajera cambia de pestaña para revisar algo.
+            child: IndexedStack(
+              index: _index,
+              children: [
+                TerminalCobroView(
+                  onVentaExitosa: (monto) => _actualizarTotalesDia(venta: monto), 
+                  onCerrarCaja: _cerrarCajaYLimpiar, 
+                  ventasTotales: ventasDelDia, 
+                  gastosTotales: gastosDelDia
+                ),
+                const CambiosView(),      
+                RegistroGastosView(onGastoRegistrado: (monto) => _actualizarTotalesDia(gasto: monto)),
+                ApartadosView(onVentaExitosa: (monto) => _actualizarTotalesDia(venta: monto)),
+                BovedaQRView(onCerrar: () => _cambiarPestana(0)), 
+                const EnviosWebView(),    
+                const InventarioStockView(), 
+                PromotoresVendedoresView(onGastoRegistrado: (monto) => _actualizarTotalesDia(gasto: monto)),
+              ],
+            ),
+          ),
         ],
       ),
     );
