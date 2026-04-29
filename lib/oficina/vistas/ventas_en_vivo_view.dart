@@ -100,7 +100,7 @@ class _VentasEnVivoViewState extends State<VentasEnVivoView> {
     return Scaffold(
       backgroundColor: const Color(
         0xFFF6F8FA,
-      ), // Fondo gris muy suave para resaltar tarjetas
+      ), // 🎨 Fondo gris muy suave para que las tarjetas resalten
       body: SafeArea(
         child: Padding(
           padding: EdgeInsets.all(isMobile ? 16.0 : 32.0),
@@ -238,7 +238,9 @@ class _VentasEnVivoViewState extends State<VentasEnVivoView> {
                         itemBuilder: (context, index) {
                           final v = _ventasVisibles[index];
                           final String tipo = v['tipo'] ?? '';
-                          final String desc = v['descripcion'] ?? '';
+                          // 🚨 AQUÍ EL SISTEMA EXTRAE LA DESCRIPCIÓN/MOTIVO DE LA BD
+                          final String desc =
+                              v['descripcion'] ?? 'Sin detalles';
                           final double monto =
                               double.tryParse(v['monto'].toString()) ?? 0;
                           final String hora = v['hora_fmt'] ?? '';
@@ -340,6 +342,7 @@ class _VentasEnVivoViewState extends State<VentasEnVivoView> {
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
                                     children: [
+                                      // 🚨 PARCHE RESPONSIVO: Expanded envuelve el título para evitar el overflow
                                       Row(
                                         mainAxisAlignment:
                                             MainAxisAlignment.spaceBetween,
@@ -369,6 +372,7 @@ class _VentasEnVivoViewState extends State<VentasEnVivoView> {
                                         ],
                                       ),
                                       const SizedBox(height: 6),
+                                      // 🚨 AQUÍ SE IMPRIME EL MOTIVO/DESCRIPCIÓN DEL GASTO O LA VENTA
                                       Text(
                                         desc,
                                         style: const TextStyle(
@@ -378,6 +382,7 @@ class _VentasEnVivoViewState extends State<VentasEnVivoView> {
                                         ),
                                       ),
                                       const SizedBox(height: 10),
+                                      // 🚨 PARCHE RESPONSIVO: Protegemos el método de pago en pantallas mini
                                       Row(
                                         children: [
                                           Icon(

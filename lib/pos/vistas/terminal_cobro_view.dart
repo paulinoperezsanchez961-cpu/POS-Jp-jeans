@@ -774,7 +774,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         final fechaHora =
             '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
 
-        // 🚨 SOLUCIÓN LINTER PDF: Se retiraron todos los 'const' en pw.Text y pw.TextStyle
         doc.addPage(
           pw.Page(
             pageFormat: const PdfPageFormat(
@@ -1015,6 +1014,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     }
   }
 
+  // 🚨 LÓGICA DE CORTE DE CAJA ACTUALIZADA PARA LEER GASTOS Y PAGOS MIXTOS
   Future<void> _imprimirCorteCaja() async {
     final prefs = await SharedPreferences.getInstance();
 
@@ -1065,6 +1065,10 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     final String? cambiosStr = prefs.getString('caja_cambios_detalles');
     List<dynamic> cambios = cambiosStr != null ? jsonDecode(cambiosStr) : [];
 
+    // 🚨 RECOLECCIÓN DE LA LISTA DE GASTOS PARA EL JSON DEL CORTE
+    final String? gastosStr = prefs.getString('caja_lista_gastos');
+    List<dynamic> gastosLista = gastosStr != null ? jsonDecode(gastosStr) : [];
+
     double calcVentasTotales = calcEfectivo + calcTarjeta + calcTransferencia;
     double totalFisicoCaja = calcEfectivo - widget.gastosTotales;
 
@@ -1073,6 +1077,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
       "items": detalles,
       "apartados": apartados,
       "cambios": cambios,
+      "gastos": gastosLista, // 🚨 SE ADJUNTA LA LISTA DE GASTOS AL SERVIDOR
     };
 
     await ApiService.guardarCorteCaja(
@@ -1126,6 +1131,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
               pw.SizedBox(height: 5),
               pw.Text(fechaHora, style: pw.TextStyle(fontSize: 8)),
               pw.Divider(borderStyle: pw.BorderStyle.dashed),
+
               if (detalles.isNotEmpty) ...[
                 pw.SizedBox(height: 5),
                 pw.Text(
@@ -1153,13 +1159,27 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                       pw.Row(
                         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                         children: [
+                          // 🚨 NITIDEZ: Método de pago en negro sólido y negrillas
                           pw.Text(
-                            '${item['metodo'] ?? 'Efectivo'} | Vend: $vendedor',
+                            '${item['metodo'] ?? 'Efectivo'}',
                             style: pw.TextStyle(
                               fontSize: 8,
-                              color: PdfColors.grey,
+                              fontWeight: pw.FontWeight.bold,
+                              color: PdfColors.black,
                             ),
                           ),
+                          pw.Text(
+                            vendedor != '' ? 'Vend: $vendedor' : '',
+                            style: pw.TextStyle(
+                              fontSize: 8,
+                              color: PdfColors.grey700,
+                            ),
+                          ),
+                        ],
+                      ),
+                      pw.Row(
+                        mainAxisAlignment: pw.MainAxisAlignment.end,
+                        children: [
                           pw.Text(
                             '\$${(item['precio'] as num).toDouble().toStringAsFixed(2)}',
                             style: pw.TextStyle(
@@ -1175,6 +1195,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                 }),
                 pw.Divider(borderStyle: pw.BorderStyle.dashed),
               ],
+
               if (apartados.isNotEmpty) ...[
                 pw.SizedBox(height: 5),
                 pw.Text(
@@ -1204,6 +1225,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                 ),
                 pw.Divider(borderStyle: pw.BorderStyle.dashed),
               ],
+
               if (cambios.isNotEmpty) ...[
                 pw.SizedBox(height: 5),
                 pw.Text(
@@ -1228,7 +1250,10 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                       ),
                       pw.Text(
                         'Motivo: ${item['motivo']}',
-                        style: pw.TextStyle(fontSize: 7, color: PdfColors.grey),
+                        style: pw.TextStyle(
+                          fontSize: 7,
+                          color: PdfColors.grey700,
+                        ),
                       ),
                       pw.SizedBox(height: 3),
                     ],
@@ -1236,6 +1261,42 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                 ),
                 pw.Divider(borderStyle: pw.BorderStyle.dashed),
               ],
+
+              // 🚨 IMPRESIÓN DEL DETALLE DE GASTOS EN EL CORTE FÍSICO
+              if (gastosLista.isNotEmpty) ...[
+                pw.SizedBox(height: 5),
+                pw.Text(
+                  'DETALLE DE GASTOS',
+                  style: pw.TextStyle(
+                    fontSize: 10,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+                pw.SizedBox(height: 5),
+                ...gastosLista.map(
+                  (item) => pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Expanded(
+                        child: pw.Text(
+                          '${item['concepto']} (${item['hora'] ?? ''})',
+                          style: pw.TextStyle(fontSize: 8),
+                        ),
+                      ),
+                      pw.Text(
+                        '-\$${(item['monto'] as num).toDouble().toStringAsFixed(2)}',
+                        style: pw.TextStyle(
+                          fontSize: 8,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                pw.Divider(borderStyle: pw.BorderStyle.dashed),
+              ],
+
               pw.SizedBox(height: 5),
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
@@ -1255,12 +1316,12 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
                   pw.Text(
-                    '  💳 En Tarjeta (MP)',
-                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey),
+                    '  💳 En Tarjeta MP',
+                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
                   ),
                   pw.Text(
                     '\$${calcTarjeta.toStringAsFixed(2)}',
-                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey),
+                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
                   ),
                 ],
               ),
@@ -1269,11 +1330,11 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                 children: [
                   pw.Text(
                     '  📱 En Transferencia',
-                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey),
+                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
                   ),
                   pw.Text(
                     '\$${calcTransferencia.toStringAsFixed(2)}',
-                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey),
+                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
                   ),
                 ],
               ),
@@ -1282,11 +1343,11 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                 children: [
                   pw.Text(
                     '  💵 En Efectivo',
-                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey),
+                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
                   ),
                   pw.Text(
                     '\$${calcEfectivo.toStringAsFixed(2)}',
-                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey),
+                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
                   ),
                 ],
               ),
@@ -1364,6 +1425,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     await prefs.remove('caja_ventas_detalles');
     await prefs.remove('caja_apartados_detalles');
     await prefs.remove('caja_cambios_detalles');
+    await prefs.remove('caja_lista_gastos'); // 🚨 LIMPIEZA DE MEMORIA DE GASTOS
 
     if (!mounted) {
       return;

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:convert';
 import '../../services/api_service.dart';
 
 class DashboardEstadisticasView extends StatefulWidget {
@@ -33,6 +34,10 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
   Map<String, int> _ventasPorVendedor = {};
   Map<String, int> _tallasVendidas = {};
   Map<String, int> _productosMasVendidos = {};
+
+  // Mapa de Motivos de Gasto
+  Map<String, double> _motivosGastosFisicos = {};
+
   String _mejorDia = "N/A";
   String _mejorHora = "N/A";
 
@@ -84,6 +89,7 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
       Map<String, int> mapProductos = {};
       Map<String, double> mapDias = {};
       Map<String, double> mapHoras = {};
+      Map<String, double> mapGastosMotivos = {};
 
       for (var p in inventario) {
         stockTotal += int.tryParse(p['stock_bodega'].toString()) ?? 0;
@@ -141,7 +147,6 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
         } else if (metodo.contains('Transferencia')) {
           sumTrans += monto;
         } else {
-          // 🚨 NOTA MATEMÁTICA: Si es un gasto de comisión, el monto es negativo y restará automáticamente al sumEf.
           sumEf += monto;
         }
 
@@ -205,19 +210,31 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
           if (enRango) {
             double g = double.tryParse(c['gastos_totales'].toString()) ?? 0;
             sumGastosCortes += g;
+
+            try {
+              Map<String, dynamic> cDetalles = jsonDecode(
+                c['detalles'] ?? '{}',
+              );
+              List cGastos = cDetalles['gastos'] ?? [];
+              for (var cg in cGastos) {
+                String motivo =
+                    cg['concepto']?.toString() ?? 'Gasto sin concepto';
+                double gMonto =
+                    double.tryParse(cg['monto']?.toString() ?? '0') ?? 0;
+                mapGastosMotivos[motivo] =
+                    (mapGastosMotivos[motivo] ?? 0) + gMonto;
+              }
+            } catch (e) {
+              debugPrint('Error leyendo motivos de gasto: $e');
+            }
           }
         }
       }
 
-      // 🚨 CÁLCULO MAESTRO ANTI-DUPLICIDAD
-      // sumGastosComisiones: Son las comisiones en VIVO (que ya restaron a sumEf).
-      // sumGastosCortes: Son TODOS los gastos reportados al final del día (Comisiones + Comidas + Limpieza, etc).
-      // La diferencia entre ambos nos da los "Gastos Extra" que NO eran comisiones.
       double gastosExtrasCaja = sumGastosCortes - sumGastosComisiones;
       if (gastosExtrasCaja < 0) gastosExtrasCaja = 0.0;
 
-      sumEf -=
-          gastosExtrasCaja; // Restamos únicamente los gastos adicionales físicos
+      sumEf -= gastosExtrasCaja;
 
       double sumFijosSemanales = 0;
       for (var f in fijos) {
@@ -252,9 +269,7 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
       if (mounted) {
         setState(() {
           _ingresosReales = sumIngresosBrutos;
-          _gastosReales =
-              sumGastosComisiones +
-              gastosExtrasCaja; // Los gastos operativos reales
+          _gastosReales = sumGastosComisiones + gastosExtrasCaja;
           _gastosFijosCalculados = fijosCalculados;
 
           _totalEfectivo = sumEf;
@@ -279,6 +294,11 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
           );
           _productosMasVendidos = Map.fromEntries(
             mapProductos.entries.toList()
+              ..sort((a, b) => b.value.compareTo(a.value)),
+          );
+
+          _motivosGastosFisicos = Map.fromEntries(
+            mapGastosMotivos.entries.toList()
               ..sort((a, b) => b.value.compareTo(a.value)),
           );
 
@@ -374,7 +394,27 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
 
   @override
   Widget build(BuildContext context) {
-    bool isMobile = MediaQuery.of(context).size.width < 800;
+    // 🚨 SISTEMA DE BREAKPOINTS LÍQUIDOS UNIVERSAL (iOS, Android, macOS, Windows)
+    double anchoPantalla = MediaQuery.of(context).size.width;
+    bool isMobile = anchoPantalla < 600;
+
+    int columnasGrid = 1;
+    double proporcionTarjetas = 1.0;
+
+    if (anchoPantalla < 500) {
+      columnasGrid = 2;
+      proporcionTarjetas = 1.3; // Más altas en celulares angostos
+    } else if (anchoPantalla < 900) {
+      columnasGrid = 3;
+      proporcionTarjetas = 1.5; // Tablets o ventanas reducidas
+    } else if (anchoPantalla < 1200) {
+      columnasGrid = 4;
+      proporcionTarjetas = 1.8; // Laptops
+    } else {
+      columnasGrid = 5;
+      proporcionTarjetas = 2.2; // Monitores grandes de Mac/Windows
+    }
+
     double neto = _ingresosReales - _gastosReales - _gastosFijosCalculados;
 
     if (_cargando) {
@@ -461,10 +501,30 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
       ],
     );
 
+    // 🚨 PANELES DE RENDIMIENTO LISTOS PARA APILARSE
+    Widget panelVendedores = _buildListCard(
+      '🏆 VENDEDORES',
+      _ventasPorVendedor,
+      Icons.person,
+      Colors.amber.shade700,
+    );
+    Widget panelTallas = _buildListCard(
+      '📏 TALLAS (Pzs)',
+      _tallasVendidas,
+      Icons.straighten,
+      Colors.cyan.shade700,
+    );
+    Widget panelPico = _buildHorarioPicoCard();
+    Widget panelGastos = _buildListCardDinero(
+      '💸 MOTIVOS DE GASTO',
+      _motivosGastosFisicos,
+      Icons.receipt_long,
+      Colors.red.shade800,
+    );
+
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
-        // 🚨 Protege contra los bordes curvos de celulares modernos
         child: Padding(
           padding: EdgeInsets.all(isMobile ? 16.0 : 32.0),
           child: SingleChildScrollView(
@@ -515,10 +575,10 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
                 ),
                 const SizedBox(height: 10),
                 GridView.count(
-                  crossAxisCount: isMobile ? 2 : 5,
+                  crossAxisCount: columnasGrid,
                   crossAxisSpacing: 16,
                   mainAxisSpacing: 16,
-                  childAspectRatio: isMobile ? 1.5 : 2,
+                  childAspectRatio: proporcionTarjetas,
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
                   children: [
@@ -576,10 +636,10 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
                 ),
                 const SizedBox(height: 10),
                 GridView.count(
-                  crossAxisCount: isMobile ? 2 : 4,
+                  crossAxisCount: columnasGrid,
                   crossAxisSpacing: 16,
                   mainAxisSpacing: 16,
-                  childAspectRatio: isMobile ? 1.5 : 2.5,
+                  childAspectRatio: proporcionTarjetas,
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
                   children: [
@@ -611,51 +671,56 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
                       Colors.white,
                       Icons.swap_horiz,
                     ),
+                    _buildMetricCard(
+                      'GASTOS TOTALES',
+                      '\$${_gastosReales.toStringAsFixed(2)}',
+                      Colors.red.shade900,
+                      Colors.red.shade50,
+                      Icons.money_off,
+                    ),
                   ],
                 ),
 
                 const SizedBox(height: 30),
 
-                // SECCIÓN 3: MAPAS DE RENDIMIENTO
-                if (isMobile) ...[
-                  _buildListCard(
-                    '🏆 VENDEDORES',
-                    _ventasPorVendedor,
-                    Icons.person,
-                    Colors.amber.shade700,
+                // SECCIÓN 3: MAPAS DE RENDIMIENTO (APILAMIENTO INTELIGENTE)
+                if (anchoPantalla < 800) ...[
+                  panelVendedores,
+                  const SizedBox(height: 16),
+                  panelTallas,
+                  const SizedBox(height: 16),
+                  panelPico,
+                  const SizedBox(height: 16),
+                  panelGastos,
+                ] else if (anchoPantalla < 1200) ...[
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: panelVendedores),
+                      const SizedBox(width: 16),
+                      Expanded(child: panelTallas),
+                    ],
                   ),
                   const SizedBox(height: 16),
-                  _buildListCard(
-                    '📏 TALLAS (Pzs)',
-                    _tallasVendidas,
-                    Icons.straighten,
-                    Colors.cyan.shade700,
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: panelPico),
+                      const SizedBox(width: 16),
+                      Expanded(child: panelGastos),
+                    ],
                   ),
-                  const SizedBox(height: 16),
-                  _buildHorarioPicoCard(),
                 ] else ...[
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
-                        child: _buildListCard(
-                          '🏆 VENDEDORES',
-                          _ventasPorVendedor,
-                          Icons.person,
-                          Colors.amber.shade700,
-                        ),
-                      ),
+                      Expanded(child: panelVendedores),
                       const SizedBox(width: 16),
-                      Expanded(
-                        child: _buildListCard(
-                          '📏 TALLAS (Pzs)',
-                          _tallasVendidas,
-                          Icons.straighten,
-                          Colors.cyan.shade700,
-                        ),
-                      ),
+                      Expanded(child: panelTallas),
                       const SizedBox(width: 16),
-                      Expanded(child: _buildHorarioPicoCard()),
+                      Expanded(child: panelPico),
+                      const SizedBox(width: 16),
+                      Expanded(child: panelGastos),
                     ],
                   ),
                 ],
@@ -825,7 +890,7 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
           const Divider(height: 24),
           if (datos.isEmpty)
             const Text(
-              'Sin datos registrados en este periodo.',
+              'Sin datos registrados.',
               style: TextStyle(
                 color: Colors.grey,
                 fontSize: 12,
@@ -853,6 +918,82 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
                         ),
                         Text(
                           '${e.value} pzs',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w900,
+                            color: colorTheme,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildListCardDinero(
+    String title,
+    Map<String, double> datos,
+    IconData icon,
+    Color colorTheme,
+  ) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.black12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 18, color: colorTheme),
+              const SizedBox(width: 8),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1,
+                ),
+              ),
+            ],
+          ),
+          const Divider(height: 24),
+          if (datos.isEmpty)
+            const Text(
+              'Sin datos registrados.',
+              style: TextStyle(
+                color: Colors.grey,
+                fontSize: 12,
+                fontStyle: FontStyle.italic,
+              ),
+            )
+          else
+            ...datos.entries
+                .take(5)
+                .map(
+                  (e) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8.0),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            e.key,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        Text(
+                          '-\$${e.value.toStringAsFixed(2)}',
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w900,

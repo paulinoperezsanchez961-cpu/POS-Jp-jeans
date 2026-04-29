@@ -99,6 +99,7 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
     List items = jsonDetalles['items'] ?? [];
     List apartados = jsonDetalles['apartados'] ?? [];
     List cambios = jsonDetalles['cambios'] ?? [];
+    List gastosDetalle = jsonDetalles['gastos'] ?? []; // 🚨 EXTRAE LOS GASTOS
     int totalPiezas = jsonDetalles['piezas'] ?? 0;
 
     if (totalPiezas == 0 && items.isNotEmpty) {
@@ -135,21 +136,14 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
               pw.SizedBox(height: 5),
               pw.Text(
                 'COPIA - CORTE DE CAJA',
-                // 🚨 Se retira el const aquí
                 style: pw.TextStyle(
                   fontSize: 14,
                   fontWeight: pw.FontWeight.bold,
                 ),
               ),
-              pw.Text(
-                'JP JEANS TLAXCALA',
-                style: pw.TextStyle(fontSize: 10), // 🚨 const retirado
-              ),
+              pw.Text('JP JEANS TLAXCALA', style: pw.TextStyle(fontSize: 10)),
               pw.SizedBox(height: 5),
-              pw.Text(
-                fechaHora,
-                style: pw.TextStyle(fontSize: 8),
-              ), // 🚨 const retirado
+              pw.Text(fechaHora, style: pw.TextStyle(fontSize: 8)),
               pw.Divider(borderStyle: pw.BorderStyle.dashed),
 
               if (items.isNotEmpty) ...[
@@ -157,7 +151,6 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
                 pw.Text(
                   'VENTAS DEL DÍA ($totalPiezas PZS)',
                   style: pw.TextStyle(
-                    // 🚨 const retirado
                     fontSize: 10,
                     fontWeight: pw.FontWeight.bold,
                   ),
@@ -175,23 +168,35 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
                     children: [
                       pw.Text(
                         itemsVendidos.replaceAll('c/u.', 'c/u\n'),
-                        style: pw.TextStyle(fontSize: 8), // 🚨 const retirado
+                        style: pw.TextStyle(fontSize: 8),
                       ),
                       pw.Row(
                         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                         children: [
+                          // 🚨 NITIDEZ: Texto de método de pago en NEGRO y NEGRITAS para impresoras térmicas
                           pw.Text(
-                            '${item['metodo'] ?? 'Efectivo'} | Vend: $vendedor',
+                            '${item['metodo'] ?? 'Efectivo'}',
                             style: pw.TextStyle(
-                              // 🚨 const retirado
                               fontSize: 8,
-                              color: PdfColors.grey,
+                              fontWeight: pw.FontWeight.bold,
+                              color: PdfColors.black,
                             ),
                           ),
                           pw.Text(
+                            vendedor != '' ? 'Vend: $vendedor' : '',
+                            style: pw.TextStyle(
+                              fontSize: 8,
+                              color: PdfColors.grey700,
+                            ),
+                          ),
+                        ],
+                      ),
+                      pw.Row(
+                        mainAxisAlignment: pw.MainAxisAlignment.end,
+                        children: [
+                          pw.Text(
                             '\$${(item['precio'] as num).toDouble().toStringAsFixed(2)}',
                             style: pw.TextStyle(
-                              // 🚨 const retirado
                               fontSize: 9,
                               fontWeight: pw.FontWeight.bold,
                             ),
@@ -210,7 +215,6 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
                 pw.Text(
                   'APARTADOS Y ABONOS',
                   style: pw.TextStyle(
-                    // 🚨 const retirado
                     fontSize: 10,
                     fontWeight: pw.FontWeight.bold,
                   ),
@@ -223,12 +227,12 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
                       pw.Expanded(
                         child: pw.Text(
                           '${item['tipo']} - ${item['cliente']}',
-                          style: pw.TextStyle(fontSize: 8), // 🚨 const retirado
+                          style: pw.TextStyle(fontSize: 8),
                         ),
                       ),
                       pw.Text(
                         '\$${(item['monto'] as num).toDouble().toStringAsFixed(2)}',
-                        style: pw.TextStyle(fontSize: 8), // 🚨 const retirado
+                        style: pw.TextStyle(fontSize: 8),
                       ),
                     ],
                   ),
@@ -241,7 +245,6 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
                 pw.Text(
                   'CAMBIOS REALIZADOS',
                   style: pw.TextStyle(
-                    // 🚨 const retirado
                     fontSize: 10,
                     fontWeight: pw.FontWeight.bold,
                   ),
@@ -253,21 +256,55 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
                     children: [
                       pw.Text(
                         'Entró: ${item['entra']}',
-                        style: pw.TextStyle(fontSize: 8), // 🚨 const retirado
+                        style: pw.TextStyle(fontSize: 8),
                       ),
                       pw.Text(
                         'Salió: ${item['sale']}',
-                        style: pw.TextStyle(fontSize: 8), // 🚨 const retirado
+                        style: pw.TextStyle(fontSize: 8),
                       ),
                       pw.Text(
                         'Motivo: ${item['motivo']}',
                         style: pw.TextStyle(
-                          // 🚨 const retirado
                           fontSize: 7,
-                          color: PdfColors.grey,
+                          color: PdfColors.grey700,
                         ),
                       ),
                       pw.SizedBox(height: 3),
+                    ],
+                  ),
+                ),
+                pw.Divider(borderStyle: pw.BorderStyle.dashed),
+              ],
+
+              // 🚨 NUEVA SECCIÓN DE GASTOS DETALLADOS EN EL TICKET
+              if (gastosDetalle.isNotEmpty) ...[
+                pw.SizedBox(height: 5),
+                pw.Text(
+                  'DETALLE DE GASTOS',
+                  style: pw.TextStyle(
+                    fontSize: 10,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+                pw.SizedBox(height: 5),
+                ...gastosDetalle.map(
+                  (item) => pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Expanded(
+                        child: pw.Text(
+                          '${item['concepto']} (${item['hora'] ?? ''})',
+                          style: pw.TextStyle(fontSize: 8),
+                        ),
+                      ),
+                      pw.Text(
+                        '-\$${(item['monto'] as num).toDouble().toStringAsFixed(2)}',
+                        style: pw.TextStyle(
+                          fontSize: 8,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -280,11 +317,11 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
                 children: [
                   pw.Text(
                     '+ VENTAS TOTALES',
-                    style: pw.TextStyle(fontSize: 10), // 🚨 const retirado
+                    style: pw.TextStyle(fontSize: 10),
                   ),
                   pw.Text(
                     '\$${ventasTotales.toStringAsFixed(2)}',
-                    style: pw.TextStyle(fontSize: 10), // 🚨 const retirado
+                    style: pw.TextStyle(fontSize: 10),
                   ),
                 ],
               ),
@@ -294,19 +331,11 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
                 children: [
                   pw.Text(
                     '  💳 En Tarjeta MP',
-                    style: pw.TextStyle(
-                      // 🚨 const retirado
-                      fontSize: 8,
-                      color: PdfColors.grey,
-                    ),
+                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
                   ),
                   pw.Text(
                     '\$${ventasTarjeta.toStringAsFixed(2)}',
-                    style: pw.TextStyle(
-                      // 🚨 const retirado
-                      fontSize: 8,
-                      color: PdfColors.grey,
-                    ),
+                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
                   ),
                 ],
               ),
@@ -315,19 +344,11 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
                 children: [
                   pw.Text(
                     '  📱 En Transferencia',
-                    style: pw.TextStyle(
-                      // 🚨 const retirado
-                      fontSize: 8,
-                      color: PdfColors.grey,
-                    ),
+                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
                   ),
                   pw.Text(
                     '\$${ventasTransferencia.toStringAsFixed(2)}',
-                    style: pw.TextStyle(
-                      // 🚨 const retirado
-                      fontSize: 8,
-                      color: PdfColors.grey,
-                    ),
+                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
                   ),
                 ],
               ),
@@ -336,19 +357,11 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
                 children: [
                   pw.Text(
                     '  💵 En Efectivo',
-                    style: pw.TextStyle(
-                      // 🚨 const retirado
-                      fontSize: 8,
-                      color: PdfColors.grey,
-                    ),
+                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
                   ),
                   pw.Text(
                     '\$${ventasEfectivo.toStringAsFixed(2)}',
-                    style: pw.TextStyle(
-                      // 🚨 const retirado
-                      fontSize: 8,
-                      color: PdfColors.grey,
-                    ),
+                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
                   ),
                 ],
               ),
@@ -358,11 +371,11 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
                 children: [
                   pw.Text(
                     '- GASTOS FISICOS',
-                    style: pw.TextStyle(fontSize: 10), // 🚨 const retirado
+                    style: pw.TextStyle(fontSize: 10),
                   ),
                   pw.Text(
                     '\$${gastos.toStringAsFixed(2)}',
-                    style: pw.TextStyle(fontSize: 10), // 🚨 const retirado
+                    style: pw.TextStyle(fontSize: 10),
                   ),
                 ],
               ),
@@ -373,7 +386,6 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
                   pw.Text(
                     'ENTREGA FÍSICA',
                     style: pw.TextStyle(
-                      // 🚨 const retirado
                       fontSize: 12,
                       fontWeight: pw.FontWeight.bold,
                     ),
@@ -381,7 +393,6 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
                   pw.Text(
                     '\$${entregaFisicaCajero.toStringAsFixed(2)}',
                     style: pw.TextStyle(
-                      // 🚨 const retirado
                       fontSize: 12,
                       fontWeight: pw.FontWeight.bold,
                     ),
@@ -408,12 +419,16 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
     List items = json['items'] ?? [];
     List apartados = json['apartados'] ?? [];
     List cambios = json['cambios'] ?? [];
+    List gastosDetalle = json['gastos'] ?? []; // 🚨 UI: EXTRAE LOS GASTOS
 
-    if (items.isEmpty && apartados.isEmpty && cambios.isEmpty) {
+    if (items.isEmpty &&
+        apartados.isEmpty &&
+        cambios.isEmpty &&
+        gastosDetalle.isEmpty) {
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 10),
         child: Text(
-          "Corte ciego (Sin prendas registradas en bitácora).",
+          "Corte ciego (Sin registros en bitácora).",
           style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic),
         ),
       );
@@ -435,6 +450,7 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
           ...items.map((i) {
             String nombreRaw = i['nombre']?.toString() ?? '';
             String precioRaw = i['precio']?.toString() ?? '0';
+            String metodoPago = i['metodo']?.toString() ?? 'Efectivo';
 
             if (nombreRaw.contains('[SKU:')) {
               List<String> partesVendedor = nombreRaw.split('| Vendedor:');
@@ -474,23 +490,38 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Row(
-                          children: [
-                            const Icon(
-                              Icons.person,
-                              size: 14,
-                              color: Colors.grey,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              vendedor,
-                              style: const TextStyle(
-                                fontSize: 11,
-                                color: Colors.grey,
-                                fontWeight: FontWeight.bold,
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                metodoPago,
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.black,
+                                ),
+                                overflow: TextOverflow.ellipsis,
                               ),
-                            ),
-                          ],
+                              Row(
+                                children: [
+                                  const Icon(
+                                    Icons.person,
+                                    size: 12,
+                                    color: Colors.grey,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    vendedor,
+                                    style: const TextStyle(
+                                      fontSize: 10,
+                                      color: Colors.grey,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
                         ),
                         Text(
                           'Total: \$$precioRaw',
@@ -514,6 +545,53 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
                 ),
               );
             }
+          }),
+          const SizedBox(height: 16),
+        ],
+
+        if (gastosDetalle.isNotEmpty) ...[
+          const Text(
+            '💸 GASTOS REGISTRADOS',
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 12,
+              color: Colors.red,
+            ),
+          ),
+          const SizedBox(height: 8),
+          ...gastosDetalle.map((g) {
+            return Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red.shade200),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Text(
+                      g['concepto'].toString(),
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.red.shade900,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '-\$${g['monto']}',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w900,
+                      color: Colors.red.shade900,
+                    ),
+                  ),
+                ],
+              ),
+            );
           }),
           const SizedBox(height: 16),
         ],
