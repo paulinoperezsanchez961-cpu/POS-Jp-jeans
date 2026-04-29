@@ -5,19 +5,22 @@ class InteligenciaArtificialView extends StatefulWidget {
   const InteligenciaArtificialView({super.key});
 
   @override
-  State<InteligenciaArtificialView> createState() => _InteligenciaArtificialViewState();
+  State<InteligenciaArtificialView> createState() =>
+      _InteligenciaArtificialViewState();
 }
 
-class _InteligenciaArtificialViewState extends State<InteligenciaArtificialView> {
+class _InteligenciaArtificialViewState
+    extends State<InteligenciaArtificialView> {
   final TextEditingController _mensajeController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   bool _estaCargando = false;
 
   final List<Map<String, dynamic>> _mensajes = [
     {
-      "texto": "Hola Jefe. Soy la IA Ejecutiva de JP Jeans. He sido actualizada con Visión Total.\n\nAhora leo en tiempo real tu inventario completo (con SKUs y tallas), los cortes de caja y cada venta que entra en el día. Pregúntame lo que quieras.", 
-      "esUsuario": false
-    }
+      "texto":
+          "Hola Jefe. Soy la IA Ejecutiva de JP Jeans. He sido actualizada con Visión Total.\n\nAhora leo en tiempo real tu inventario completo (con SKUs y tallas), los cortes de caja y cada venta que entra en el día. Pregúntame lo que quieras.",
+      "esUsuario": false,
+    },
   ];
 
   void _hacerScrollAlFondo() {
@@ -39,7 +42,7 @@ class _InteligenciaArtificialViewState extends State<InteligenciaArtificialView>
       final resultados = await Future.wait([
         ApiService.obtenerInventario(),
         ApiService.obtenerVentasEnVivo(), // Por defecto trae las de HOY
-        ApiService.obtenerHistorialCortes()
+        ApiService.obtenerHistorialCortes(),
       ]);
 
       final List<dynamic> inventario = resultados[0];
@@ -47,10 +50,12 @@ class _InteligenciaArtificialViewState extends State<InteligenciaArtificialView>
       final List<dynamic> cortes = resultados[2];
 
       StringBuffer ctx = StringBuffer();
-      
+
       // Instrucciones directas de sistema para la IA
-      ctx.writeln("INSTRUCCIÓN CRÍTICA PARA LA IA: A continuación se te entrega un volcado en tiempo real de la base de datos. DEBES basar tus respuestas estrictamente en esta información. Si el dueño te pregunta por ventas de hoy, analiza los 'MOVIMIENTOS DE HOY'. Si pregunta por prendas, vestidos, pantalones, o stock, busca en el 'INVENTARIO ACTUAL' y dale la cantidad exacta, nombre y SKU.\n");
-      
+      ctx.writeln(
+        "INSTRUCCIÓN CRÍTICA PARA LA IA: A continuación se te entrega un volcado en tiempo real de la base de datos. DEBES basar tus respuestas estrictamente en esta información. Si el dueño te pregunta por ventas de hoy, analiza los 'MOVIMIENTOS DE HOY'. Si pregunta por prendas, vestidos, pantalones, o stock, busca en el 'INVENTARIO ACTUAL' y dale la cantidad exacta, nombre y SKU.\n",
+      );
+
       // 1. INYECTAR INVENTARIO DETALLADO
       ctx.writeln("--- INVENTARIO ACTUAL ---");
       if (inventario.isEmpty) {
@@ -58,7 +63,9 @@ class _InteligenciaArtificialViewState extends State<InteligenciaArtificialView>
       } else {
         for (var p in inventario) {
           // Inyectamos SKU, nombre, categoría, stock general y el JSON de las tallas
-          ctx.writeln("- SKU: ${p['sku']} | Nombre: ${p['nombre']} | Categoría: ${p['categoria'] ?? 'Sin categoría'} | Stock Total: ${p['stock_bodega']} | Tallas y piezas: ${p['tallas']} | Precio: \$${p['precio_venta']}");
+          ctx.writeln(
+            "- SKU: ${p['sku']} | Nombre: ${p['nombre']} | Categoría: ${p['categoria'] ?? 'Sin categoría'} | Stock Total: ${p['stock_bodega']} | Tallas y piezas: ${p['tallas']} | Precio: \$${p['precio_venta']}",
+          );
         }
       }
 
@@ -69,10 +76,14 @@ class _InteligenciaArtificialViewState extends State<InteligenciaArtificialView>
       } else {
         double totalHoy = 0.0;
         for (var v in ventasHoy) {
-          ctx.writeln("- [${v['hora_fmt']}] TIPO: ${v['tipo']} | MONTO: \$${v['monto']} (Pagado en: ${v['metodo_pago'] ?? 'Efectivo'}) | DETALLE: ${v['descripcion']}");
+          ctx.writeln(
+            "- [${v['hora_fmt']}] TIPO: ${v['tipo']} | MONTO: \$${v['monto']} (Pagado en: ${v['metodo_pago'] ?? 'Efectivo'}) | DETALLE: ${v['descripcion']}",
+          );
           totalHoy += double.tryParse(v['monto'].toString()) ?? 0.0;
         }
-        ctx.writeln(">> TOTAL DE DINERO QUE HA ENTRADO HOY: \$${totalHoy.toStringAsFixed(2)}");
+        ctx.writeln(
+          ">> TOTAL DE DINERO QUE HA ENTRADO HOY: \$${totalHoy.toStringAsFixed(2)}",
+        );
       }
 
       // 3. INYECTAR ÚLTIMOS CORTES
@@ -83,7 +94,9 @@ class _InteligenciaArtificialViewState extends State<InteligenciaArtificialView>
         int limite = cortes.length > 3 ? 3 : cortes.length;
         for (int i = 0; i < limite; i++) {
           var c = cortes[i];
-          ctx.writeln("- Fecha: ${c['fecha_formateada']} | Cajero: ${c['cajero']} | Ventas Totales: \$${c['ventas_totales']} (Efectivo: \$${c['ventas_efectivo']}, Tarjeta: \$${c['ventas_tarjeta']}) | Gastos: \$${c['gastos_totales']}");
+          ctx.writeln(
+            "- Fecha: ${c['fecha_formateada']} | Cajero: ${c['cajero']} | Ventas Totales: \$${c['ventas_totales']} (Efectivo: \$${c['ventas_efectivo']}, Tarjeta: \$${c['ventas_tarjeta']}) | Gastos: \$${c['gastos_totales']}",
+          );
         }
       }
 
@@ -111,9 +124,11 @@ class _InteligenciaArtificialViewState extends State<InteligenciaArtificialView>
     String preguntaConContexto = contextoGigante + preguntaVisual;
 
     // Se manda el paquete completo a Gemini
-    final String respuesta = await ApiService.preguntarALaIA(preguntaConContexto);
+    final String respuesta = await ApiService.preguntarALaIA(
+      preguntaConContexto,
+    );
 
-    if (!mounted) return; 
+    if (!mounted) return;
     setState(() {
       _estaCargando = false;
       _mensajes.add({"texto": respuesta, "esUsuario": false});
@@ -134,18 +149,38 @@ class _InteligenciaArtificialViewState extends State<InteligenciaArtificialView>
           children: [
             Row(
               children: [
-                const Icon(Icons.auto_awesome, color: Colors.deepPurpleAccent, size: 30),
+                const Icon(
+                  Icons.auto_awesome,
+                  color: Colors.deepPurpleAccent,
+                  size: 30,
+                ),
                 const SizedBox(width: 16),
-                Text('CEREBRO IA', style: TextStyle(fontSize: isMobile ? 20 : 24, fontWeight: FontWeight.w300, letterSpacing: 3)),
+                Expanded(
+                  child: Text(
+                    'CEREBRO IA',
+                    style: TextStyle(
+                      fontSize: isMobile ? 20 : 24,
+                      fontWeight: FontWeight.w300,
+                      letterSpacing: 3,
+                    ),
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 8),
-            const Text('Copiloto de Inteligencia de Negocios en Tiempo Real.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+            const Text(
+              'Copiloto de Inteligencia de Negocios en Tiempo Real.',
+              style: TextStyle(color: Colors.grey, fontSize: 12),
+            ),
             const SizedBox(height: 30),
-            
+
             Expanded(
               child: Container(
-                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.deepPurple.shade100)),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.deepPurple.shade100),
+                ),
                 child: Column(
                   children: [
                     Expanded(
@@ -165,9 +200,26 @@ class _InteligenciaArtificialViewState extends State<InteligenciaArtificialView>
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            SizedBox(width: 15, height: 15, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.deepPurple)),
+                            SizedBox(
+                              width: 15,
+                              height: 15,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.deepPurple,
+                              ),
+                            ),
                             SizedBox(width: 10),
-                            Text("Extrayendo volcado de base de datos y analizando...", style: TextStyle(color: Colors.deepPurple, fontSize: 12, fontWeight: FontWeight.bold)),
+                            // 🚨 PARCHE: Flexible evita que el texto se desborde en iPhone Mini
+                            Flexible(
+                              child: Text(
+                                "Extrayendo volcado de base de datos y analizando...",
+                                style: TextStyle(
+                                  color: Colors.deepPurple,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -179,23 +231,36 @@ class _InteligenciaArtificialViewState extends State<InteligenciaArtificialView>
                           Expanded(
                             child: TextField(
                               controller: _mensajeController,
-                              decoration: const InputDecoration(hintText: 'Ej. ¿Cuántos vestidos tenemos y cuáles son sus SKUs?', border: OutlineInputBorder(), filled: true, fillColor: Color(0xFFF9F9F9)),
+                              decoration: const InputDecoration(
+                                hintText:
+                                    'Ej. ¿Cuántos vestidos tenemos y cuáles son sus SKUs?',
+                                border: OutlineInputBorder(),
+                                filled: true,
+                                fillColor: Color(0xFFF9F9F9),
+                              ),
                               onSubmitted: (_) => _enviarMensaje(),
-                            )
+                            ),
                           ),
                           const SizedBox(width: 10),
                           ElevatedButton(
-                            style: ElevatedButton.styleFrom(backgroundColor: Colors.deepPurple, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 20)), 
-                            onPressed: _estaCargando ? null : _enviarMensaje, 
-                            child: const Icon(Icons.send)
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.deepPurple,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(
+                                vertical: 20,
+                                horizontal: 20,
+                              ),
+                            ),
+                            onPressed: _estaCargando ? null : _enviarMensaje,
+                            child: const Icon(Icons.send),
                           ),
                         ],
                       ),
-                    )
+                    ),
                   ],
                 ),
               ),
-            )
+            ),
           ],
         ),
       ),
@@ -212,12 +277,25 @@ class _InteligenciaArtificialViewState extends State<InteligenciaArtificialView>
         decoration: BoxDecoration(
           color: isUser ? Colors.black : Colors.deepPurple.shade50,
           borderRadius: BorderRadius.circular(16).copyWith(
-            bottomRight: isUser ? const Radius.circular(0) : const Radius.circular(16),
-            topLeft: !isUser ? const Radius.circular(0) : const Radius.circular(16),
+            bottomRight: isUser
+                ? const Radius.circular(0)
+                : const Radius.circular(16),
+            topLeft: !isUser
+                ? const Radius.circular(0)
+                : const Radius.circular(16),
           ),
-          border: Border.all(color: isUser ? Colors.black : Colors.deepPurple.shade100)
+          border: Border.all(
+            color: isUser ? Colors.black : Colors.deepPurple.shade100,
+          ),
         ),
-        child: Text(mensaje, style: TextStyle(color: isUser ? Colors.white : Colors.black87, fontSize: 13, height: 1.5)),
+        child: Text(
+          mensaje,
+          style: TextStyle(
+            color: isUser ? Colors.white : Colors.black87,
+            fontSize: 13,
+            height: 1.5,
+          ),
+        ),
       ),
     );
   }
