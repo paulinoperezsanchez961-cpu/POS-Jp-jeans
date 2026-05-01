@@ -37,7 +37,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
   final TextEditingController _cuponController = TextEditingController();
   final FocusNode _buscadorFocus = FocusNode();
 
-  // 🚨 Controladores para el Pago Mixto
   final TextEditingController _mixtoEfectivoController =
       TextEditingController();
   final TextEditingController _mixtoTransfController = TextEditingController();
@@ -499,6 +498,9 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     });
   }
 
+  // ==============================================================================
+  // 💳 FLUJO DE COBRO MP: ESTRICTO CONTROL DE ESTADOS DE LA TERMINAL
+  // ==============================================================================
   Future<void> _iniciarCobroTerminalMP() async {
     if (carrito.isEmpty || _procesandoCobro) return;
 
@@ -567,34 +569,28 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
 
             if (statusData['exito'] == true) {
               String estado = statusData['estado'];
-
+              // 🚨 Este es el estado REAL del banco (approved, rejected, etc.)
               String estadoPago = statusData['estado_pago'] ?? 'desconocido';
 
               if (estado == 'FINISHED') {
+                timer.cancel();
+                nav.pop();
+
                 if (estadoPago == 'approved') {
-                  timer.cancel();
-                  nav.pop();
-                  _ejecutarCobroEImprimirTicket(metodo: "Tarjeta MP");
-                } else if (estadoPago == 'rejected') {
-                  timer.cancel();
-                  nav.pop();
-                  sm.showSnackBar(
-                    const SnackBar(
-                      content: Text('❌ Pago RECHAZADO (Fondos insuficientes)'),
-                      backgroundColor: Colors.red,
-                    ),
+                  // 🚨 ÉXITO ABSOLUTO: Mandamos el intentId para que el servidor haga su doble check
+                  _ejecutarCobroEImprimirTicket(
+                    metodo: "Tarjeta MP",
+                    mpIntentId: intentId,
                   );
-                  setState(() => _procesandoCobro = false);
-                  _buscadorFocus.requestFocus();
-                } else if (estadoPago == 'desconocido') {
-                  timer.cancel();
-                  nav.pop();
+                } else {
+                  // 🚨 BLOQUEO: Cualquier cosa que NO sea 'approved' se aborta al instante
                   sm.showSnackBar(
-                    const SnackBar(
+                    SnackBar(
                       content: Text(
-                        '⚠️ ADVERTENCIA: Servidor desactualizado. Valida que el dinero entró a la cuenta.',
+                        '❌ Pago RECHAZADO por el banco ($estadoPago). Revisa la tarjeta o fondos.',
                       ),
-                      backgroundColor: Colors.orange,
+                      backgroundColor: Colors.red,
+                      duration: const Duration(seconds: 5),
                     ),
                   );
                   setState(() => _procesandoCobro = false);
@@ -605,7 +601,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                 nav.pop();
                 sm.showSnackBar(
                   SnackBar(
-                    content: Text('Pago cancelado o rechazado ($estado)'),
+                    content: Text('❌ Pago cancelado en la terminal ($estado)'),
                     backgroundColor: Colors.red,
                   ),
                 );
@@ -623,7 +619,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
             setState(() => _procesandoCobro = false);
             sm.showSnackBar(
               const SnackBar(
-                content: Text('Error al consultar estado de MP'),
+                content: Text('Error al consultar estado a Mercado Pago'),
                 backgroundColor: Colors.red,
               ),
             );
@@ -655,7 +651,11 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     }
   }
 
-  Future<void> _ejecutarCobroEImprimirTicket({required String metodo}) async {
+  // 🚨 Recibimos el mpIntentId (Opcional, solo para Tarjetas MP)
+  Future<void> _ejecutarCobroEImprimirTicket({
+    required String metodo,
+    String? mpIntentId,
+  }) async {
     double pagoEf = 0.0;
     double pagoTr = 0.0;
     String metodoDB = metodo;
@@ -714,14 +714,21 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     }).toList();
 
     try {
+      // 🚨 AGREGAMOS EL ID SI EXISTE EN EL JSON QUE VA AL SERVIDOR
+      var bodyData = {
+        "carrito": carritoAEnviar,
+        "metodo_pago": metodoDB,
+        "codigo_creador": _vendedorAsociado,
+      };
+
+      if (mpIntentId != null) {
+        bodyData["mp_intent_id"] = mpIntentId;
+      }
+
       var res = await http.post(
         Uri.parse('${ApiService.baseUrl}/pos/vender'),
         headers: {"Content-Type": "application/json"},
-        body: jsonEncode({
-          "carrito": carritoAEnviar,
-          "metodo_pago": metodoDB,
-          "codigo_creador": _vendedorAsociado,
-        }),
+        body: jsonEncode(bodyData),
       );
 
       if (!mounted) return;
@@ -989,10 +996,12 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
           name: 'Ticket_JPJeans',
         );
       } else {
+        // 🚨 SI EL SERVIDOR DICE RECHAZADO (Ej. Error de la línea 150 de server.js)
         sm.showSnackBar(
           SnackBar(
             content: Text('❌ Error BD: ${data['error']}'),
             backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
           ),
         );
       }
@@ -1014,7 +1023,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     }
   }
 
-  // 🚨 LÓGICA DE CORTE DE CAJA ACTUALIZADA PARA LEER GASTOS Y PAGOS MIXTOS
   Future<void> _imprimirCorteCaja() async {
     final prefs = await SharedPreferences.getInstance();
 
@@ -1065,7 +1073,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     final String? cambiosStr = prefs.getString('caja_cambios_detalles');
     List<dynamic> cambios = cambiosStr != null ? jsonDecode(cambiosStr) : [];
 
-    // 🚨 RECOLECCIÓN DE LA LISTA DE GASTOS PARA EL JSON DEL CORTE
     final String? gastosStr = prefs.getString('caja_lista_gastos');
     List<dynamic> gastosLista = gastosStr != null ? jsonDecode(gastosStr) : [];
 
@@ -1077,7 +1084,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
       "items": detalles,
       "apartados": apartados,
       "cambios": cambios,
-      "gastos": gastosLista, // 🚨 SE ADJUNTA LA LISTA DE GASTOS AL SERVIDOR
+      "gastos": gastosLista,
     };
 
     await ApiService.guardarCorteCaja(
@@ -1159,7 +1166,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                       pw.Row(
                         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                         children: [
-                          // 🚨 NITIDEZ: Método de pago en negro sólido y negrillas
                           pw.Text(
                             '${item['metodo'] ?? 'Efectivo'}',
                             style: pw.TextStyle(
@@ -1262,7 +1268,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                 pw.Divider(borderStyle: pw.BorderStyle.dashed),
               ],
 
-              // 🚨 IMPRESIÓN DEL DETALLE DE GASTOS EN EL CORTE FÍSICO
               if (gastosLista.isNotEmpty) ...[
                 pw.SizedBox(height: 5),
                 pw.Text(
@@ -1425,7 +1430,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     await prefs.remove('caja_ventas_detalles');
     await prefs.remove('caja_apartados_detalles');
     await prefs.remove('caja_cambios_detalles');
-    await prefs.remove('caja_lista_gastos'); // 🚨 LIMPIEZA DE MEMORIA DE GASTOS
+    await prefs.remove('caja_lista_gastos');
 
     if (!mounted) {
       return;
