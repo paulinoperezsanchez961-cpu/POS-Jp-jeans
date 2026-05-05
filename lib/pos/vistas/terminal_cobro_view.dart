@@ -157,7 +157,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     if (Platform.isAndroid) {
       return await getExternalStorageDirectory();
     } else {
-      return Directory(Directory.current.path);
+      return await getApplicationDocumentsDirectory();
     }
   }
 
@@ -220,13 +220,13 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         );
       },
     ).then((_) {
-      _buscadorFocus.requestFocus();
+      if (mounted) _buscadorFocus.requestFocus();
     });
   }
 
   void _agregarAlCarrito(String codigoOBusqueda) {
     if (codigoOBusqueda.isEmpty) {
-      _buscadorFocus.requestFocus();
+      if (mounted) _buscadorFocus.requestFocus();
       return;
     }
 
@@ -258,7 +258,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         ),
       );
       _buscadorController.clear();
-      _buscadorFocus.requestFocus();
+      if (mounted) _buscadorFocus.requestFocus();
     }
   }
 
@@ -298,7 +298,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         ),
       );
       _buscadorController.clear();
-      _buscadorFocus.requestFocus();
+      if (mounted) _buscadorFocus.requestFocus();
       return;
     }
 
@@ -330,7 +330,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
       _recalcularTotal();
       _buscadorController.clear();
       _guardarCarritoMemoria();
-      _buscadorFocus.requestFocus();
+      if (mounted) _buscadorFocus.requestFocus();
     });
   }
 
@@ -376,7 +376,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         }
       }
     });
-    _buscadorFocus.requestFocus();
+    if (mounted) _buscadorFocus.requestFocus();
   }
 
   void _quitarDelCarrito(int index) {
@@ -393,7 +393,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
       _recalcularTotal();
       _guardarCarritoMemoria();
     });
-    _buscadorFocus.requestFocus();
+    if (mounted) _buscadorFocus.requestFocus();
   }
 
   Future<void> _aplicarCupon() async {
@@ -414,7 +414,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
           backgroundColor: Colors.blue,
         ),
       );
-      _buscadorFocus.requestFocus();
+      if (mounted) _buscadorFocus.requestFocus();
       return;
     }
 
@@ -461,7 +461,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         ),
       );
     } finally {
-      _buscadorFocus.requestFocus();
+      if (mounted) _buscadorFocus.requestFocus();
     }
   }
 
@@ -498,9 +498,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     });
   }
 
-  // ==============================================================================
-  // 💳 FLUJO DE COBRO MP: ESTRICTO CONTROL DE ESTADOS DE LA TERMINAL
-  // ==============================================================================
   Future<void> _iniciarCobroTerminalMP() async {
     if (carrito.isEmpty || _procesandoCobro) return;
 
@@ -569,7 +566,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
 
             if (statusData['exito'] == true) {
               String estado = statusData['estado'];
-              // 🚨 Este es el estado REAL del banco (approved, rejected, etc.)
               String estadoPago = statusData['estado_pago'] ?? 'desconocido';
 
               if (estado == 'FINISHED') {
@@ -579,7 +575,8 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                 if (estadoPago == 'approved') {
                   // 🚨 ÉXITO ABSOLUTO: Mandamos el intentId para que el servidor haga su doble check
                   _ejecutarCobroEImprimirTicket(
-                    metodo: "Tarjeta MP",
+                    metodo:
+                        "Tarjeta MP", // Se enviará "Tarjeta" a la API más adelante
                     mpIntentId: intentId,
                   );
                 } else {
@@ -594,7 +591,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                     ),
                   );
                   setState(() => _procesandoCobro = false);
-                  _buscadorFocus.requestFocus();
+                  if (mounted) _buscadorFocus.requestFocus();
                 }
               } else if (estado == 'CANCELED' || estado == 'ERROR') {
                 timer.cancel();
@@ -606,7 +603,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                   ),
                 );
                 setState(() => _procesandoCobro = false);
-                _buscadorFocus.requestFocus();
+                if (mounted) _buscadorFocus.requestFocus();
               }
             }
           } catch (e) {
@@ -623,7 +620,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                 backgroundColor: Colors.red,
               ),
             );
-            _buscadorFocus.requestFocus();
+            if (mounted) _buscadorFocus.requestFocus();
           }
         });
       } else {
@@ -635,7 +632,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
             backgroundColor: Colors.red,
           ),
         );
-        _buscadorFocus.requestFocus();
+        if (mounted) _buscadorFocus.requestFocus();
       }
     } catch (e) {
       if (!mounted) return;
@@ -647,11 +644,10 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
           backgroundColor: Colors.red,
         ),
       );
-      _buscadorFocus.requestFocus();
+      if (mounted) _buscadorFocus.requestFocus();
     }
   }
 
-  // 🚨 Recibimos el mpIntentId (Opcional, solo para Tarjetas MP)
   Future<void> _ejecutarCobroEImprimirTicket({
     required String metodo,
     String? mpIntentId,
@@ -670,7 +666,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
             backgroundColor: Colors.orange,
           ),
         );
-        _buscadorFocus.requestFocus();
+        if (mounted) _buscadorFocus.requestFocus();
         return;
       }
     } else if (metodo == "MIXTO") {
@@ -683,7 +679,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
             backgroundColor: Colors.orange,
           ),
         );
-        _buscadorFocus.requestFocus();
+        if (mounted) _buscadorFocus.requestFocus();
         return;
       }
 
@@ -692,6 +688,11 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
 
       metodoDB =
           "MIXTO (Efectivo: \$${netoEfectivo.toStringAsFixed(2)}, Transf: \$${pagoTr.toStringAsFixed(2)})";
+    }
+
+    // 🚨 PARCHE: Forzar el método "Tarjeta" para compatibilidad estricta con el servidor
+    if (metodoDB == "Tarjeta MP") {
+      metodoDB = "Tarjeta";
     }
 
     setState(() => _procesandoCobro = true);
@@ -714,10 +715,9 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     }).toList();
 
     try {
-      // 🚨 AGREGAMOS EL ID SI EXISTE EN EL JSON QUE VA AL SERVIDOR
       var bodyData = {
         "carrito": carritoAEnviar,
-        "metodo_pago": metodoDB,
+        "metodo_pago": metodoDB, // ¡Ahora siempre envía "Tarjeta"!
         "codigo_creador": _vendedorAsociado,
       };
 
@@ -745,7 +745,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
           carritoAEnviar,
           totalImpresion,
           _vendedorAsociado,
-          metodoDB,
+          metodoDB, // Guarda "Tarjeta" en la memoria local también
         );
         widget.onVentaExitosa(_total);
 
@@ -807,7 +807,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                   pw.SizedBox(height: 5),
                   pw.Text(fechaHora, style: pw.TextStyle(fontSize: 8)),
                   pw.Text(
-                    'Método: ${metodo == "MIXTO" ? "PAGO MIXTO" : metodo}',
+                    'Método: ${metodoDB == "MIXTO" ? "PAGO MIXTO" : metodoDB}',
                     style: pw.TextStyle(
                       fontSize: 8,
                       fontWeight: pw.FontWeight.bold,
@@ -950,7 +950,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                           'PAGO APROBADO',
                           style: pw.TextStyle(fontSize: 8),
                         ),
-                        pw.Text('TARJETA MP', style: pw.TextStyle(fontSize: 8)),
+                        pw.Text('TARJETA', style: pw.TextStyle(fontSize: 8)),
                       ],
                     ),
                   ],
@@ -996,7 +996,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
           name: 'Ticket_JPJeans',
         );
       } else {
-        // 🚨 SI EL SERVIDOR DICE RECHAZADO (Ej. Error de la línea 150 de server.js)
         sm.showSnackBar(
           SnackBar(
             content: Text('❌ Error BD: ${data['error']}'),
@@ -1018,8 +1017,8 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         setState(() {
           _procesandoCobro = false;
         });
+        _buscadorFocus.requestFocus();
       }
-      _buscadorFocus.requestFocus();
     }
   }
 
@@ -1036,12 +1035,13 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     for (var d in detalles) {
       totalPiezas += (d['cantidad'] as int);
       double monto = (d['precio'] as num).toDouble();
+      String met = d['metodo'].toString().toUpperCase();
 
-      if (d['metodo'] == 'Tarjeta MP') {
+      if (met.contains('TARJETA') || met == 'TARJETA MP') {
         calcTarjeta += monto;
-      } else if (d['metodo'] == 'Transferencia') {
+      } else if (met.contains('TRANSF')) {
         calcTransferencia += monto;
-      } else if (d['metodo'].toString().startsWith('MIXTO')) {
+      } else if (met.contains('MIXTO')) {
         RegExp reg = RegExp(
           r'Efectivo:\s*\$([\d\.]+),\s*Transf:\s*\$([\d\.]+)',
         );
@@ -1061,9 +1061,11 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         : [];
     for (var a in apartados) {
       double monto = (a['monto'] as num).toDouble();
-      if (a['metodo'] == 'Tarjeta MP') {
+      String met = a['metodo'].toString().toUpperCase();
+
+      if (met.contains('TARJETA') || met == 'TARJETA MP') {
         calcTarjeta += monto;
-      } else if (a['metodo'] == 'Transferencia') {
+      } else if (met.contains('TRANSF')) {
         calcTransferencia += monto;
       } else {
         calcEfectivo += monto;
@@ -1087,14 +1089,29 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
       "gastos": gastosLista,
     };
 
-    await ApiService.guardarCorteCaja(
-      "Cajero Mostrador",
-      calcEfectivo,
-      calcTarjeta,
-      calcTransferencia,
-      widget.gastosTotales,
-      detalles: detallesCorte,
-    );
+    try {
+      await ApiService.guardarCorteCaja(
+        "Cajero Mostrador",
+        calcEfectivo,
+        calcTarjeta,
+        calcTransferencia,
+        widget.gastosTotales,
+        detalles: detallesCorte,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '❌ No hay internet. El corte NO se guardó en el servidor, tus datos siguen seguros.',
+          ),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 6),
+        ),
+      );
+      return;
+    }
+
     if (!mounted) {
       return;
     }
@@ -1321,7 +1338,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
                   pw.Text(
-                    '  💳 En Tarjeta MP',
+                    '  💳 En Tarjeta',
                     style: pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
                   ),
                   pw.Text(
