@@ -1,0 +1,728 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
+import '../../services/api_service.dart';
+
+class OficinaVipView extends StatefulWidget {
+  const OficinaVipView({super.key});
+
+  @override
+  State<OficinaVipView> createState() => _OficinaVipViewState();
+}
+
+class _OficinaVipViewState extends State<OficinaVipView> {
+  // Configuración de Cashback
+  double _bonoBienvenida = 150.0;
+  double _plEfe = 5.0, _orEfe = 10.0, _tiEfe = 15.0;
+  double _plTar = 2.0, _orTar = 5.0, _tiTar = 8.0;
+
+  List<dynamic> _clientes = [];
+  bool _cargandoTodo = true;
+  bool _guardando = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargarDatos();
+  }
+
+  Future<void> _cargarDatos() async {
+    final config = await ApiService.obtenerConfiguracionVIP();
+    final clientes = await ApiService.obtenerClientesVIP();
+    if (mounted) {
+      setState(() {
+        if (config.isNotEmpty) {
+          _bonoBienvenida =
+              double.tryParse(config['bono_bienvenida']?.toString() ?? '150') ??
+              150.0;
+          _plEfe =
+              double.tryParse(
+                config['cashback_plata_efectivo']?.toString() ?? '5',
+              ) ??
+              5.0;
+          _plTar =
+              double.tryParse(
+                config['cashback_plata_tarjeta']?.toString() ?? '2',
+              ) ??
+              2.0;
+          _orEfe =
+              double.tryParse(
+                config['cashback_oro_efectivo']?.toString() ?? '10',
+              ) ??
+              10.0;
+          _orTar =
+              double.tryParse(
+                config['cashback_oro_tarjeta']?.toString() ?? '5',
+              ) ??
+              5.0;
+          _tiEfe =
+              double.tryParse(
+                config['cashback_titanio_efectivo']?.toString() ?? '15',
+              ) ??
+              15.0;
+          _tiTar =
+              double.tryParse(
+                config['cashback_titanio_tarjeta']?.toString() ?? '8',
+              ) ??
+              8.0;
+        }
+        _clientes = clientes;
+        _cargandoTodo = false;
+      });
+    }
+  }
+
+  Future<void> _guardarConfiguracion() async {
+    setState(() => _guardando = true);
+    final exito = await ApiService.guardarConfiguracionVIP(
+      _bonoBienvenida,
+      _plEfe,
+      _plTar,
+      _orEfe,
+      _orTar,
+      _tiEfe,
+      _tiTar,
+    );
+    if (!mounted) return;
+    setState(() => _guardando = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(exito ? '✅ Guardado.' : '❌ Error al guardar.'),
+        backgroundColor: exito ? Colors.green : Colors.red,
+      ),
+    );
+  }
+
+  Future<void> _eliminarCliente(int id) async {
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Eliminar Cliente'),
+        content: const Text('¿Deseas eliminar este cliente y sus puntos?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text(
+              'Eliminar',
+              style: TextStyle(color: Colors.white),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmar == true) {
+      final exito = await ApiService.eliminarClienteVIP(id);
+      if (exito) _cargarDatos();
+    }
+  }
+
+  // ===========================================================================
+  // 🎨 MOTOR DE DISEÑO PREMIUM (CORREGIDO PARA PDF Y LECTURA DE LOGOS)
+  // ===========================================================================
+  Future<void> _generarPdfTarjeta(dynamic cliente) async {
+    final pdf = pw.Document();
+    final String nombre = cliente['nombre'].toString().toUpperCase();
+    final String qrData = cliente['qr_hash'] ?? 'ERROR';
+    final String nivel = cliente['nivel_vip'] ?? 'plata';
+    final String idUnico = cliente['id'].toString().padLeft(6, '0');
+
+    final DateTime hoy = DateTime.now();
+    final String emitido =
+        "${hoy.day.toString().padLeft(2, '0')}/${hoy.month.toString().padLeft(2, '0')}/${hoy.year}";
+    final String vence =
+        "${hoy.day.toString().padLeft(2, '0')}/${hoy.month.toString().padLeft(2, '0')}/${hoy.year + 1}";
+
+    // Paleta de Colores de la Librería PDF
+    PdfColor bgColor = const PdfColor.fromInt(0xFFE8E8E8); // Plata
+    PdfColor accentColor = const PdfColor.fromInt(0xFF050505);
+    PdfColor borderOpacity = const PdfColor(0, 0, 0, 0.4);
+    PdfColor textOpacity = const PdfColor(0, 0, 0, 0.7);
+    String logoPath = 'assets/logo.png';
+
+    if (nivel == 'oro') {
+      bgColor = const PdfColor.fromInt(0xFFD4AF37);
+      logoPath = 'assets/logo.png';
+    } else if (nivel == 'titanio') {
+      bgColor = const PdfColor.fromInt(0xFF222222);
+      accentColor = const PdfColor.fromInt(0xFFF5F5F5);
+      borderOpacity = const PdfColor(1, 1, 1, 0.4);
+      textOpacity = const PdfColor(1, 1, 1, 0.7);
+      logoPath = 'assets/logob.png';
+    }
+
+    // Intentamos cargar tu logo local (Si falla, usa texto "J P" como respaldo)
+    pw.MemoryImage? logoImage;
+    try {
+      final logoByteData = await rootBundle.load(logoPath);
+      logoImage = pw.MemoryImage(logoByteData.buffer.asUint8List());
+    } catch (e) {
+      debugPrint(
+        "⚠️ No se encontró el logo en: $logoPath. Usando respaldo de texto.",
+      );
+    }
+
+    // --- CARA A: FRENTE ---
+    pdf.addPage(
+      pw.Page(
+        pageFormat: const PdfPageFormat(
+          85.6 * PdfPageFormat.mm,
+          53.98 * PdfPageFormat.mm,
+          marginAll: 0,
+        ),
+        build: (pw.Context context) {
+          return pw.Container(
+            padding: const pw.EdgeInsets.all(3),
+            decoration: pw.BoxDecoration(color: bgColor),
+            child: pw.Container(
+              padding: const pw.EdgeInsets.all(2),
+              decoration: pw.BoxDecoration(
+                border: pw.Border.all(
+                  color: borderOpacity,
+                  width: 1.5,
+                ), // Borde Exterior Grueso
+              ),
+              child: pw.Container(
+                decoration: pw.BoxDecoration(
+                  border: pw.Border.all(
+                    color: borderOpacity,
+                    width: 0.5,
+                  ), // Borde Interior Fino (Simula Greca Elegante)
+                ),
+                child: pw.Center(
+                  child: pw.Column(
+                    mainAxisAlignment: pw.MainAxisAlignment.center,
+                    children: [
+                      // INYECCIÓN DE TU LOGO
+                      if (logoImage != null)
+                        pw.Image(logoImage, width: 60)
+                      else
+                        pw.Text(
+                          "J P",
+                          style: pw.TextStyle(
+                            fontSize: 30,
+                            fontWeight: pw.FontWeight.bold,
+                            letterSpacing: 10,
+                            color: accentColor,
+                          ),
+                        ),
+
+                      pw.SizedBox(height: 15),
+                      pw.Text(
+                        nombre,
+                        style: pw.TextStyle(
+                          fontSize: 11,
+                          fontWeight: pw.FontWeight.bold,
+                          letterSpacing: 1.5,
+                          color: accentColor,
+                        ),
+                      ),
+                      pw.SizedBox(height: 3),
+                      pw.Text(
+                        "GRACIAS POR CONFIAR EN MANOS MEXICANAS",
+                        style: pw.TextStyle(
+                          fontSize: 5,
+                          letterSpacing: 1,
+                          color: textOpacity,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+
+    // --- CARA B: REVERSO ---
+    pdf.addPage(
+      pw.Page(
+        pageFormat: const PdfPageFormat(
+          85.6 * PdfPageFormat.mm,
+          53.98 * PdfPageFormat.mm,
+          marginAll: 0,
+        ),
+        build: (pw.Context context) {
+          return pw.Container(
+            padding: const pw.EdgeInsets.all(3),
+            decoration: pw.BoxDecoration(color: bgColor),
+            child: pw.Container(
+              padding: const pw.EdgeInsets.all(2),
+              decoration: pw.BoxDecoration(
+                border: pw.Border.all(color: borderOpacity, width: 1.5),
+              ),
+              child: pw.Container(
+                padding: const pw.EdgeInsets.all(10),
+                decoration: pw.BoxDecoration(
+                  border: pw.Border.all(color: borderOpacity, width: 0.5),
+                ),
+                child: pw.Column(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text(
+                      "COMPRANDO NACIONAL GANAMOS TODOS",
+                      style: pw.TextStyle(
+                        fontSize: 6,
+                        fontWeight: pw.FontWeight.bold,
+                        letterSpacing: 1,
+                        color: accentColor,
+                      ),
+                    ),
+
+                    // QR BLINDADO DE ALTO CONTRASTE
+                    pw.Center(
+                      child: pw.Container(
+                        padding: const pw.EdgeInsets.all(3),
+                        decoration: pw.BoxDecoration(
+                          color: PdfColors.white,
+                          borderRadius: pw.BorderRadius.circular(4),
+                        ),
+                        child: pw.BarcodeWidget(
+                          barcode: pw.Barcode.qrCode(),
+                          data: qrData,
+                          width: 65,
+                          height: 65,
+                        ),
+                      ),
+                    ),
+
+                    // FECHAS (Izq y Der como solicitaste)
+                    pw.Row(
+                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: pw.CrossAxisAlignment.end,
+                      children: [
+                        pw.Column(
+                          crossAxisAlignment: pw.CrossAxisAlignment.start,
+                          children: [
+                            pw.Text(
+                              "EMITIDA",
+                              style: pw.TextStyle(
+                                fontSize: 4,
+                                color: textOpacity,
+                                fontWeight: pw.FontWeight.bold,
+                              ),
+                            ),
+                            pw.Text(
+                              emitido,
+                              style: pw.TextStyle(
+                                fontSize: 6,
+                                fontWeight: pw.FontWeight.bold,
+                                color: accentColor,
+                              ),
+                            ),
+                          ],
+                        ),
+                        pw.Text(
+                          "ID: JPV-$idUnico",
+                          style: pw.TextStyle(
+                            fontSize: 6,
+                            color: accentColor,
+                            letterSpacing: 1,
+                            fontWeight: pw.FontWeight.bold,
+                          ),
+                        ),
+                        pw.Column(
+                          crossAxisAlignment: pw.CrossAxisAlignment.end,
+                          children: [
+                            pw.Text(
+                              "VENCE",
+                              style: pw.TextStyle(
+                                fontSize: 4,
+                                color: textOpacity,
+                                fontWeight: pw.FontWeight.bold,
+                              ),
+                            ),
+                            pw.Text(
+                              vence,
+                              style: pw.TextStyle(
+                                fontSize: 6,
+                                fontWeight: pw.FontWeight.bold,
+                                color: accentColor,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+
+    // Manda el diseño a la impresora/PDF
+    await Printing.layoutPdf(
+      onLayout: (PdfPageFormat format) async => pdf.save(),
+    );
+  }
+
+  // ===========================================================================
+  // INTERFAZ DE USUARIO
+  // ===========================================================================
+
+  Widget _construirTarjetaConfigDual(
+    String titulo,
+    double valEfe,
+    Function(double) onEfe,
+    double valTar,
+    Function(double) onTar,
+    Color colorBase,
+  ) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            titulo,
+            style: TextStyle(
+              fontWeight: FontWeight.w900,
+              color: colorBase,
+              fontSize: 16,
+            ),
+          ),
+          const Divider(height: 20),
+          Row(
+            children: [
+              const Icon(Icons.payments, color: Colors.green, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Slider(
+                  value: valEfe,
+                  min: 0,
+                  max: 50,
+                  divisions: 50,
+                  activeColor: Colors.green,
+                  label: '${valEfe.toInt()}%',
+                  onChanged: onEfe,
+                ),
+              ),
+              Text(
+                '${valEfe.toInt()}%',
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.green,
+                ),
+              ),
+            ],
+          ),
+          Row(
+            children: [
+              const Icon(Icons.credit_card, color: Colors.blue, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Slider(
+                  value: valTar,
+                  min: 0,
+                  max: 50,
+                  divisions: 50,
+                  activeColor: Colors.blue,
+                  label: '${valTar.toInt()}%',
+                  onChanged: onTar,
+                ),
+              ),
+              Text(
+                '${valTar.toInt()}%',
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.blue,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        backgroundColor: const Color(0xFFF9F9F9),
+        appBar: AppBar(
+          title: const Text(
+            'CONTROL VIP Y RECOMPENSAS',
+            style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1.5),
+          ),
+          backgroundColor: Colors.white,
+          foregroundColor: Colors.black,
+          elevation: 0,
+          bottom: const TabBar(
+            labelColor: Colors.black,
+            indicatorColor: Colors.black,
+            tabs: [
+              Tab(icon: Icon(Icons.settings), text: 'AJUSTES CASHBACK'),
+              Tab(icon: Icon(Icons.people), text: 'BASE DE DATOS CLIENTES'),
+            ],
+          ),
+        ),
+        body: TabBarView(
+          children: [
+            // PESTAÑA 1: CONFIGURACIÓN
+            _cargandoTodo
+                ? const Center(child: CircularProgressIndicator())
+                : SingleChildScrollView(
+                    padding: const EdgeInsets.all(32),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: Colors.grey.shade200),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Bono Inicial de Bienvenida',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                  color: Colors.green,
+                                  fontSize: 16,
+                                ),
+                              ),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Slider(
+                                      value: _bonoBienvenida,
+                                      min: 0,
+                                      max: 500,
+                                      divisions: 100,
+                                      activeColor: Colors.green,
+                                      label: '\$${_bonoBienvenida.toInt()}',
+                                      onChanged: (v) =>
+                                          setState(() => _bonoBienvenida = v),
+                                    ),
+                                  ),
+                                  Text(
+                                    '\$${_bonoBienvenida.toInt()}',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 18,
+                                      color: Colors.green,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        GridView.count(
+                          crossAxisCount:
+                              MediaQuery.of(context).size.width > 800 ? 2 : 1,
+                          crossAxisSpacing: 24,
+                          mainAxisSpacing: 24,
+                          shrinkWrap: true,
+                          childAspectRatio:
+                              MediaQuery.of(context).size.width > 800
+                              ? 2.2
+                              : 1.5,
+                          physics: const NeverScrollableScrollPhysics(),
+                          children: [
+                            _construirTarjetaConfigDual(
+                              'Nivel Plata',
+                              _plEfe,
+                              (v) => setState(() => _plEfe = v),
+                              _plTar,
+                              (v) => setState(() => _plTar = v),
+                              Colors.blueGrey,
+                            ),
+                            _construirTarjetaConfigDual(
+                              'Nivel Oro',
+                              _orEfe,
+                              (v) => setState(() => _orEfe = v),
+                              _orTar,
+                              (v) => setState(() => _orTar = v),
+                              Colors.amber.shade600,
+                            ),
+                            _construirTarjetaConfigDual(
+                              'Nivel Titanio',
+                              _tiEfe,
+                              (v) => setState(() => _tiEfe = v),
+                              _tiTar,
+                              (v) => setState(() => _tiTar = v),
+                              Colors.black87,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 40),
+                        Center(
+                          child: ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.black,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 40,
+                                vertical: 20,
+                              ),
+                            ),
+                            icon: _guardando
+                                ? const CircularProgressIndicator(
+                                    color: Colors.white,
+                                  )
+                                : const Icon(Icons.save),
+                            label: const Text('GUARDAR CONFIGURACIÓN'),
+                            onPressed: _guardando
+                                ? null
+                                : _guardarConfiguracion,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+            // PESTAÑA 2: BASE DE DATOS Y BOTÓN DE PDF
+            _cargandoTodo
+                ? const Center(child: CircularProgressIndicator())
+                : Container(
+                    padding: const EdgeInsets.all(24),
+                    child: Card(
+                      elevation: 2,
+                      child: ListView(
+                        children: [
+                          DataTable(
+                            headingRowColor: WidgetStateProperty.all(
+                              Colors.grey.shade200,
+                            ),
+                            columns: const [
+                              DataColumn(
+                                label: Text(
+                                  'ID',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              DataColumn(
+                                label: Text(
+                                  'Nombre',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              DataColumn(
+                                label: Text(
+                                  'Nivel',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              DataColumn(
+                                label: Text(
+                                  'Saldo',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              DataColumn(
+                                label: Text(
+                                  'Compras',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              DataColumn(
+                                label: Text(
+                                  'Acciones',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            ],
+                            rows: _clientes
+                                .map(
+                                  (c) => DataRow(
+                                    cells: [
+                                      DataCell(Text(c['id'].toString())),
+                                      DataCell(
+                                        Text(
+                                          c['nombre'],
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                      DataCell(
+                                        Chip(
+                                          label: Text(
+                                            c['nivel_vip']
+                                                .toString()
+                                                .toUpperCase(),
+                                            style: const TextStyle(
+                                              fontSize: 10,
+                                            ),
+                                          ),
+                                          backgroundColor: Colors.grey.shade300,
+                                        ),
+                                      ),
+                                      DataCell(
+                                        Text(
+                                          '\$${c['saldo_cashback']}',
+                                          style: const TextStyle(
+                                            color: Colors.green,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                      DataCell(
+                                        Text(c['compras_totales'].toString()),
+                                      ),
+                                      DataCell(
+                                        Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            // 🚨 BOTÓN PARA GENERAR EL PDF CON EL DISEÑO DE TU LOGO
+                                            IconButton(
+                                              icon: const Icon(
+                                                Icons.print,
+                                                color: Colors.blueAccent,
+                                              ),
+                                              tooltip:
+                                                  'Generar Diseño PDF para Imprenta',
+                                              onPressed: () =>
+                                                  _generarPdfTarjeta(c),
+                                            ),
+                                            IconButton(
+                                              icon: const Icon(
+                                                Icons.delete,
+                                                color: Colors.red,
+                                              ),
+                                              tooltip: 'Eliminar Cliente',
+                                              onPressed: () =>
+                                                  _eliminarCliente(c['id']),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                )
+                                .toList(),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+          ],
+        ),
+      ),
+    );
+  }
+}

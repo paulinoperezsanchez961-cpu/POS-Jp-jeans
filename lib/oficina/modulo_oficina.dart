@@ -7,6 +7,7 @@ import 'vistas/promotores_vendedores_view.dart';
 import 'vistas/inteligencia_artificial_view.dart';
 import 'vistas/configuracion_oficina_view.dart';
 import 'vistas/ventas_en_vivo_view.dart';
+import 'vistas/oficina_vip_view.dart'; // 👑 IMPORTACIÓN DE LA VISTA VIP
 
 class ModuloOficina extends StatefulWidget {
   const ModuloOficina({super.key});
@@ -73,13 +74,14 @@ class _ModuloOficinaState extends State<ModuloOficina> {
       const ContabilidadCortesView(),
       const PromotoresVendedoresView(),
       const InteligenciaArtificialView(),
+      const OficinaVipView(), // 👑 NUEVA VISTA AGREGADA AQUÍ (Índice 6)
       const ConfiguracionOficinaView(),
     ];
 
     return Scaffold(
       backgroundColor: const Color(0xFFF6F8FA),
 
-      // 🚨 PARCHE iOS/ANDROID: Barra de navegación inferior Scrollable (No se aplasta)
+      // 🚨 PARCHE iOS/ANDROID: Barra de navegación inferior Scrollable
       bottomNavigationBar: isMobile
           ? Container(
               decoration: BoxDecoration(
@@ -93,7 +95,6 @@ class _ModuloOficinaState extends State<ModuloOficina> {
                 ],
               ),
               child: SafeArea(
-                // Protege contra la barra inferior del iPhone
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   physics: const BouncingScrollPhysics(),
@@ -131,6 +132,11 @@ class _ModuloOficinaState extends State<ModuloOficina> {
                       ),
                       _buildBotonNavegacionMovil(
                         6,
+                        Icons.workspace_premium_outlined,
+                        'CLUB VIP',
+                      ),
+                      _buildBotonNavegacionMovil(
+                        7,
                         Icons.settings_outlined,
                         'AJUSTES',
                       ),
@@ -146,8 +152,7 @@ class _ModuloOficinaState extends State<ModuloOficina> {
           // 🚨 PARCHE WINDOWS/MAC: Menú lateral adaptativo
           if (!isMobile)
             NavigationRail(
-              extended:
-                  isLargeDesktop, // Se expande automáticamente en monitores grandes
+              extended: isLargeDesktop,
               backgroundColor: const Color(0xFF1E1E1E),
               selectedIndex: _index,
               onDestinationSelected: _cambiarPestana,
@@ -197,6 +202,10 @@ class _ModuloOficinaState extends State<ModuloOficina> {
                 NavigationRailDestination(
                   icon: Icon(Icons.auto_awesome),
                   label: Text('CEREBRO IA'),
+                ),
+                NavigationRailDestination(
+                  icon: Icon(Icons.workspace_premium_outlined),
+                  label: Text('CLUB VIP'),
                 ),
                 NavigationRailDestination(
                   icon: Icon(Icons.settings_outlined),

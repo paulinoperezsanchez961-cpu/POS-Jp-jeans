@@ -34,9 +34,10 @@ dev_dependencies:
 flutter:
   uses-material-design: true
 
-  # 🚨 AQUÍ ESTÁ TU LOGO
+  # 🚨 AQUÍ ESTÁN DECLARADOS AMBOS LOGOS PARA EL PDF
   assets:
     - assets/logo.png
+    - assets/logob.png
 
 # ==============================================================
 # 🚨 CONFIGURACIÓN AUTOMÁTICA DE ÍCONOS PARA ANDROID, IOS Y PC
