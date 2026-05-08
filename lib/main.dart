@@ -6,7 +6,6 @@ import 'package:http/http.dart' as http;
 import 'package:local_auth/local_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-// 🚨 IMPORTAMOS LOS MÓDULOS SEPARADOS Y EL API SERVICE
 import 'oficina/modulo_oficina.dart';
 import 'pos/modulo_pos.dart';
 import 'services/api_service.dart';
@@ -109,7 +108,10 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isBiometricLoading = false;
   final LocalAuthentication _auth = LocalAuthentication();
 
-  bool _mostrarBotonFaceID = false;
+  bool _mostrarBotonBiometrico = false;
+  String _usuarioGuardado = '';
+  String _labelBiometrico = 'BIOMETRÍA';
+  IconData _iconoBiometrico = Icons.fingerprint;
 
   @override
   void initState() {
@@ -120,15 +122,35 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _verificarPerfilGuardado() async {
     final prefs = await SharedPreferences.getInstance();
     final String? perfil = prefs.getString('perfil_usuario');
+    final String? usuario = prefs.getString('usuario_guardado');
 
-    if (perfil != null) {
+    if (perfil != null && usuario != null) {
       bool canCheckBiometrics = await _auth.canCheckBiometrics;
       bool isDeviceSupported = await _auth.isDeviceSupported();
 
       if (canCheckBiometrics && isDeviceSupported) {
+        List<BiometricType> biometrics = await _auth.getAvailableBiometrics();
+        String tipoBio = 'BIOMETRÍA';
+        IconData iconoBio = Icons.security;
+
+        if (biometrics.contains(BiometricType.face)) {
+          tipoBio = 'FACE ID';
+          iconoBio = Icons.face_unlock_outlined;
+        } else if (biometrics.contains(BiometricType.fingerprint)) {
+          tipoBio = 'HUELLA';
+          iconoBio = Icons.fingerprint;
+        } else if (biometrics.contains(BiometricType.strong) ||
+            biometrics.contains(BiometricType.weak)) {
+          tipoBio = 'HUELLA / ROSTRO';
+          iconoBio = Icons.fingerprint;
+        }
+
         if (!mounted) return;
         setState(() {
-          _mostrarBotonFaceID = true;
+          _mostrarBotonBiometrico = true;
+          _usuarioGuardado = usuario;
+          _labelBiometrico = tipoBio;
+          _iconoBiometrico = iconoBio;
         });
       }
     }
@@ -163,6 +185,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (resOficina.statusCode == 200) {
         await prefs.setString('perfil_usuario', 'oficina');
+        await prefs.setString('usuario_guardado', user);
 
         if (!mounted) return;
         Navigator.pushReplacement(
@@ -182,6 +205,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (resCajero.statusCode == 200) {
         await prefs.setString('perfil_usuario', 'cajero');
+        await prefs.setString('usuario_guardado', user);
 
         if (!mounted) return;
         Navigator.pushReplacement(
@@ -197,8 +221,7 @@ class _LoginScreenState extends State<LoginScreen> {
           backgroundColor: Colors.red,
         ),
       );
-    } catch (e) {
-      debugPrint("Error de Login: $e");
+    } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -213,12 +236,13 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  Future<void> _iniciarConFaceID() async {
+  Future<void> _iniciarConBiometria() async {
     setState(() => _isBiometricLoading = true);
 
     try {
       bool exito = await _auth.authenticate(
-        localizedReason: 'Escanea tu rostro o huella para entrar a JP Jeans',
+        localizedReason:
+            'Verifica tu identidad para entrar como ${_usuarioGuardado.toUpperCase()}',
       );
 
       if (!mounted) return;
@@ -250,8 +274,7 @@ class _LoginScreenState extends State<LoginScreen> {
           );
         }
       }
-    } on PlatformException catch (e) {
-      debugPrint("Error biométrico: ${e.message}");
+    } on PlatformException catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -279,14 +302,14 @@ class _LoginScreenState extends State<LoginScreen> {
               padding: const EdgeInsets.all(40),
               decoration: BoxDecoration(
                 color: Colors.white,
-                border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
+                border: Border.all(color: const Color(0x0D000000)),
                 borderRadius: BorderRadius.circular(16),
-                boxShadow: [
+                boxShadow: const [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.03),
+                    color: Color(0x08000000),
                     blurRadius: 24,
                     spreadRadius: 8,
-                    offset: const Offset(0, 10),
+                    offset: Offset(0, 10),
                   ),
                 ],
               ),
@@ -380,7 +403,17 @@ class _LoginScreenState extends State<LoginScreen> {
 
                   const SizedBox(height: 16),
 
-                  if (_mostrarBotonFaceID)
+                  if (_mostrarBotonBiometrico) ...[
+                    Text(
+                      'Continuar como: ${_usuarioGuardado.toUpperCase()}',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
                     SizedBox(
                       width: double.infinity,
                       height: 55,
@@ -394,7 +427,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                         onPressed: _isBiometricLoading
                             ? null
-                            : _iniciarConFaceID,
+                            : _iniciarConBiometria,
                         icon: _isBiometricLoading
                             ? const SizedBox(
                                 width: 20,
@@ -404,13 +437,14 @@ class _LoginScreenState extends State<LoginScreen> {
                                   strokeWidth: 2,
                                 ),
                               )
-                            : const Icon(Icons.face_unlock_outlined, size: 24),
-                        label: const Text(
-                          'ENTRAR CON FACE ID',
-                          style: TextStyle(fontWeight: FontWeight.bold),
+                            : Icon(_iconoBiometrico, size: 24),
+                        label: Text(
+                          'ENTRAR CON $_labelBiometrico',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
                       ),
                     ),
+                  ],
 
                   const SizedBox(height: 24),
                   const Row(
@@ -464,7 +498,6 @@ class CentroDeControlAdmin extends StatelessWidget {
             IconButton(
               icon: const Icon(Icons.logout),
               onPressed: () {
-                // 🚨 AHORA SOLO TE REGRESA AL LOGIN, PERO NO BORRA EL FACE ID
                 Navigator.pushReplacement(
                   context,
                   MaterialPageRoute(builder: (_) => const LoginScreen()),
@@ -512,7 +545,6 @@ class MostradorCajero extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () {
-              // 🚨 AHORA SOLO TE REGRESA AL LOGIN, PERO NO BORRA EL FACE ID
               Navigator.pushReplacement(
                 context,
                 MaterialPageRoute(builder: (_) => const LoginScreen()),
