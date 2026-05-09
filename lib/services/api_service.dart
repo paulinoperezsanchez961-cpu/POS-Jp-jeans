@@ -9,6 +9,7 @@ class ApiService {
   // 👑 CLUB VIP & CASHBACK DUAL
   // ==========================================================
 
+  // ESTA FUNCIÓN SE USA EN LA TERMINAL DE COBRO (Para cobrar con saldo VIP)
   static Future<Map<String, dynamic>> consultarVIP(String qrHash) async {
     try {
       final res = await http.get(
@@ -23,10 +24,31 @@ class ApiService {
     }
   }
 
+  // 1. Consultar si un QR es virgen o ya tiene dueño (NUEVA PARA EL ESCÁNER)
+  static Future<Map<String, dynamic>> consultarQRVIP(String qr) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/pos/vip/consultar/$qr'),
+      );
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      }
+      return {
+        "exito": false,
+        "registrado": false,
+        "error": "Error de servidor",
+      };
+    } catch (e) {
+      return {"exito": false, "error": e.toString()};
+    }
+  }
+
+  // 2. Registrar cliente vinculado a un QR físico (AHORA RECIBE 4 PARÁMETROS)
   static Future<Map<String, dynamic>> registrarVIP(
     String nombre,
     String email,
     String telefono,
+    String qrHash,
   ) async {
     try {
       final res = await http.post(
@@ -36,11 +58,34 @@ class ApiService {
           "nombre": nombre,
           "email": email,
           "telefono": telefono,
+          "qr_hash": qrHash,
         }),
       );
       return jsonDecode(res.body);
     } catch (e) {
       return {'exito': false, 'error': 'Error al registrar al cliente VIP.'};
+    }
+  }
+
+  // 3. Traspasar historial de una tarjeta vieja a una nueva (Ascenso Oro/Titanio)
+  static Future<Map<String, dynamic>> traspasarVIP(
+    String viejoQr,
+    String nuevoQr,
+    String nuevoNivel,
+  ) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/pos/vip/traspasar'),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({
+          "viejo_qr": viejoQr,
+          "nuevo_qr": nuevoQr,
+          "nuevo_nivel": nuevoNivel,
+        }),
+      );
+      return jsonDecode(response.body);
+    } catch (e) {
+      return {"exito": false, "error": e.toString()};
     }
   }
 

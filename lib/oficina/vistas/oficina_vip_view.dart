@@ -89,7 +89,9 @@ class _OficinaVipViewState extends State<OficinaVipView> {
     setState(() => _guardando = false);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(exito ? '✅ Guardado.' : '❌ Error al guardar.'),
+        content: Text(
+          exito ? '✅ Ajustes guardados correctamente.' : '❌ Error al guardar.',
+        ),
         backgroundColor: exito ? Colors.green : Colors.red,
       ),
     );
@@ -98,17 +100,19 @@ class _OficinaVipViewState extends State<OficinaVipView> {
   Future<void> _eliminarCliente(int id) async {
     final confirmar = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (BuildContext ctxDialog) => AlertDialog(
         title: const Text('Eliminar Cliente'),
-        content: const Text('¿Deseas eliminar este cliente y sus puntos?'),
+        content: const Text(
+          '¿Deseas eliminar este cliente y sus puntos acumulados?',
+        ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(ctxDialog, false),
             child: const Text('Cancelar'),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: () => Navigator.pop(ctxDialog, true),
             child: const Text(
               'Eliminar',
               style: TextStyle(color: Colors.white),
@@ -117,7 +121,6 @@ class _OficinaVipViewState extends State<OficinaVipView> {
         ],
       ),
     );
-
     if (confirmar == true) {
       final exito = await ApiService.eliminarClienteVIP(id);
       if (exito) _cargarDatos();
@@ -125,112 +128,132 @@ class _OficinaVipViewState extends State<OficinaVipView> {
   }
 
   // ===========================================================================
-  // 🎨 MOTOR DE DISEÑO PREMIUM (CORREGIDO PARA PDF Y LECTURA DE LOGOS)
+  // 🏭 FASE 1: GENERADOR DE LOTES DE STOCK (TARJETAS GENÉRICAS)
   // ===========================================================================
-  Future<void> _generarPdfTarjeta(dynamic cliente) async {
+
+  void _mostrarDialogoLotes(String nivel) {
+    TextEditingController cantidadCtrl = TextEditingController(text: '50');
+    showDialog(
+      context: context,
+      builder: (BuildContext ctxDialog) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Generar Lote: Tarjeta ${nivel.toUpperCase()}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Ingresa la cantidad de tarjetas vírgenes para stock.',
+              style: TextStyle(fontSize: 13, color: Colors.grey),
+            ),
+            const SizedBox(height: 20),
+            TextField(
+              controller: cantidadCtrl,
+              keyboardType: TextInputType.number,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Cantidad a imprimir',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.style),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctxDialog),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.black,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () {
+              int cant = int.tryParse(cantidadCtrl.text) ?? 0;
+              if (cant > 0) {
+                Navigator.pop(ctxDialog);
+                _generarLotePDF(nivel, cant);
+              }
+            },
+            child: const Text('CREAR PDF DE STOCK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _generarLotePDF(String nivel, int cantidad) async {
+    setState(() => _guardando = true);
     final pdf = pw.Document();
-    final String nombre = cliente['nombre'].toString().toUpperCase();
-    final String qrData = cliente['qr_hash'] ?? 'ERROR';
-    final String nivel = cliente['nivel_vip'] ?? 'plata';
-    final String idUnico = cliente['id'].toString().padLeft(6, '0');
 
-    final DateTime hoy = DateTime.now();
-    final String emitido =
-        "${hoy.day.toString().padLeft(2, '0')}/${hoy.month.toString().padLeft(2, '0')}/${hoy.year}";
-    final String vence =
-        "${hoy.day.toString().padLeft(2, '0')}/${hoy.month.toString().padLeft(2, '0')}/${hoy.year + 1}";
-
-    // Paleta de Colores de la Librería PDF
     PdfColor bgColor = const PdfColor.fromInt(0xFFE8E8E8); // Plata
-    PdfColor accentColor = const PdfColor.fromInt(0xFF050505);
-    PdfColor borderOpacity = const PdfColor(0, 0, 0, 0.4);
-    PdfColor textOpacity = const PdfColor(0, 0, 0, 0.7);
+    PdfColor accentColor = const PdfColor.fromInt(0xFF010101);
+    PdfColor borderOpacity = const PdfColor(0.01, 0.01, 0.01, 0.3);
     String logoPath = 'assets/logo.png';
+    String prefijo = '1';
 
     if (nivel == 'oro') {
       bgColor = const PdfColor.fromInt(0xFFD4AF37);
-      logoPath = 'assets/logo.png';
-    } else if (nivel == 'titanio') {
-      bgColor = const PdfColor.fromInt(0xFF222222);
-      accentColor = const PdfColor.fromInt(0xFFF5F5F5);
-      borderOpacity = const PdfColor(1, 1, 1, 0.4);
-      textOpacity = const PdfColor(1, 1, 1, 0.7);
-      logoPath = 'assets/logob.png';
+      prefijo = '2';
     }
 
-    // Intentamos cargar tu logo local (Si falla, usa texto "J P" como respaldo)
     pw.MemoryImage? logoImage;
     try {
       final logoByteData = await rootBundle.load(logoPath);
       logoImage = pw.MemoryImage(logoByteData.buffer.asUint8List());
-    } catch (e) {
-      debugPrint(
-        "⚠️ No se encontró el logo en: $logoPath. Usando respaldo de texto.",
-      );
+    } catch (_) {
+      // 🚨 CORRECCIÓN: Ignorar error con "_" para evitar advertencia de "variable sin usar"
+      debugPrint("Logo no encontrado en assets.");
     }
 
-    // --- CARA A: FRENTE ---
-    pdf.addPage(
-      pw.Page(
-        pageFormat: const PdfPageFormat(
-          85.6 * PdfPageFormat.mm,
-          53.98 * PdfPageFormat.mm,
-          marginAll: 0,
-        ),
-        build: (pw.Context context) {
-          return pw.Container(
+    for (int i = 0; i < cantidad; i++) {
+      final String uniqueId =
+          "$prefijo-${DateTime.now().microsecondsSinceEpoch.toString().substring(8)}-${(100 + (i % 899))}";
+
+      // CARA A
+      pdf.addPage(
+        pw.Page(
+          pageFormat: const PdfPageFormat(
+            85.6 * PdfPageFormat.mm,
+            53.98 * PdfPageFormat.mm,
+            marginAll: 0,
+          ),
+          // 🚨 CORRECCIÓN: Cambiamos 'context' por 'ctx' para evitar shadowing
+          build: (pw.Context ctx) => pw.Container(
             padding: const pw.EdgeInsets.all(3),
             decoration: pw.BoxDecoration(color: bgColor),
             child: pw.Container(
               padding: const pw.EdgeInsets.all(2),
               decoration: pw.BoxDecoration(
-                border: pw.Border.all(
-                  color: borderOpacity,
-                  width: 1.5,
-                ), // Borde Exterior Grueso
+                border: pw.Border.all(color: borderOpacity, width: 1.5),
               ),
               child: pw.Container(
                 decoration: pw.BoxDecoration(
-                  border: pw.Border.all(
-                    color: borderOpacity,
-                    width: 0.5,
-                  ), // Borde Interior Fino (Simula Greca Elegante)
+                  border: pw.Border.all(color: borderOpacity, width: 0.5),
                 ),
                 child: pw.Center(
                   child: pw.Column(
                     mainAxisAlignment: pw.MainAxisAlignment.center,
                     children: [
-                      // INYECCIÓN DE TU LOGO
                       if (logoImage != null)
-                        pw.Image(logoImage, width: 60)
+                        pw.Image(logoImage, width: 65)
                       else
                         pw.Text(
-                          "J P",
+                          "JP",
                           style: pw.TextStyle(
                             fontSize: 30,
                             fontWeight: pw.FontWeight.bold,
-                            letterSpacing: 10,
                             color: accentColor,
                           ),
                         ),
-
-                      pw.SizedBox(height: 15),
-                      pw.Text(
-                        nombre,
-                        style: pw.TextStyle(
-                          fontSize: 11,
-                          fontWeight: pw.FontWeight.bold,
-                          letterSpacing: 1.5,
-                          color: accentColor,
-                        ),
-                      ),
-                      pw.SizedBox(height: 3),
+                      pw.SizedBox(height: 18),
                       pw.Text(
                         "GRACIAS POR CONFIAR EN MANOS MEXICANAS",
                         style: pw.TextStyle(
-                          fontSize: 5,
-                          letterSpacing: 1,
-                          color: textOpacity,
+                          fontSize: 6.5,
+                          fontWeight: pw.FontWeight.bold,
+                          letterSpacing: 1.2,
+                          color: accentColor,
                         ),
                       ),
                     ],
@@ -238,21 +261,19 @@ class _OficinaVipViewState extends State<OficinaVipView> {
                 ),
               ),
             ),
-          );
-        },
-      ),
-    );
-
-    // --- CARA B: REVERSO ---
-    pdf.addPage(
-      pw.Page(
-        pageFormat: const PdfPageFormat(
-          85.6 * PdfPageFormat.mm,
-          53.98 * PdfPageFormat.mm,
-          marginAll: 0,
+          ),
         ),
-        build: (pw.Context context) {
-          return pw.Container(
+      );
+
+      // CARA B
+      pdf.addPage(
+        pw.Page(
+          pageFormat: const PdfPageFormat(
+            85.6 * PdfPageFormat.mm,
+            53.98 * PdfPageFormat.mm,
+            marginAll: 0,
+          ),
+          build: (pw.Context ctx) => pw.Container(
             padding: const pw.EdgeInsets.all(3),
             decoration: pw.BoxDecoration(color: bgColor),
             child: pw.Container(
@@ -271,14 +292,11 @@ class _OficinaVipViewState extends State<OficinaVipView> {
                     pw.Text(
                       "COMPRANDO NACIONAL GANAMOS TODOS",
                       style: pw.TextStyle(
-                        fontSize: 6,
+                        fontSize: 7,
                         fontWeight: pw.FontWeight.bold,
-                        letterSpacing: 1,
                         color: accentColor,
                       ),
                     ),
-
-                    // QR BLINDADO DE ALTO CONTRASTE
                     pw.Center(
                       child: pw.Container(
                         padding: const pw.EdgeInsets.all(3),
@@ -288,84 +306,228 @@ class _OficinaVipViewState extends State<OficinaVipView> {
                         ),
                         child: pw.BarcodeWidget(
                           barcode: pw.Barcode.qrCode(),
-                          data: qrData,
-                          width: 65,
-                          height: 65,
+                          data: uniqueId,
+                          width: 80,
+                          height: 80,
                         ),
                       ),
                     ),
-
-                    // FECHAS (Izq y Der como solicitaste)
-                    pw.Row(
-                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                      crossAxisAlignment: pw.CrossAxisAlignment.end,
-                      children: [
-                        pw.Column(
-                          crossAxisAlignment: pw.CrossAxisAlignment.start,
-                          children: [
-                            pw.Text(
-                              "EMITIDA",
-                              style: pw.TextStyle(
-                                fontSize: 4,
-                                color: textOpacity,
-                                fontWeight: pw.FontWeight.bold,
-                              ),
-                            ),
-                            pw.Text(
-                              emitido,
-                              style: pw.TextStyle(
-                                fontSize: 6,
-                                fontWeight: pw.FontWeight.bold,
-                                color: accentColor,
-                              ),
-                            ),
-                          ],
-                        ),
-                        pw.Text(
-                          "ID: JPV-$idUnico",
-                          style: pw.TextStyle(
-                            fontSize: 6,
-                            color: accentColor,
-                            letterSpacing: 1,
-                            fontWeight: pw.FontWeight.bold,
-                          ),
-                        ),
-                        pw.Column(
-                          crossAxisAlignment: pw.CrossAxisAlignment.end,
-                          children: [
-                            pw.Text(
-                              "VENCE",
-                              style: pw.TextStyle(
-                                fontSize: 4,
-                                color: textOpacity,
-                                fontWeight: pw.FontWeight.bold,
-                              ),
-                            ),
-                            pw.Text(
-                              vence,
-                              style: pw.TextStyle(
-                                fontSize: 6,
-                                fontWeight: pw.FontWeight.bold,
-                                color: accentColor,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
+                    pw.Text(
+                      "ID: $uniqueId",
+                      style: pw.TextStyle(
+                        fontSize: 8,
+                        fontWeight: pw.FontWeight.bold,
+                        color: accentColor,
+                      ),
                     ),
                   ],
                 ),
               ),
             ),
-          );
-        },
+          ),
+        ),
+      );
+    }
+
+    if (mounted) setState(() => _guardando = false);
+    // 🚨 CORRECCIÓN: Se eliminó el 'async' redundante de esta función
+    await Printing.layoutPdf(onLayout: (PdfPageFormat format) => pdf.save());
+  }
+
+  // ===========================================================================
+  // 👑 REIMPRESIÓN TITANIO (EDICIÓN ESPECIAL PERSONALIZADA)
+  // ===========================================================================
+
+  Future<void> _generarPdfTitanioPersonalizada(dynamic cliente) async {
+    final pdf = pw.Document();
+    final String nombre = cliente['nombre'].toString().toUpperCase();
+    final String qrData = cliente['qr_hash'] ?? 'ERROR';
+    final DateTime hoy = DateTime.now();
+    final String emitido =
+        "${hoy.day.toString().padLeft(2, '0')}/${hoy.month.toString().padLeft(2, '0')}/${hoy.year}";
+    final String vence =
+        "${hoy.day.toString().padLeft(2, '0')}/${hoy.month.toString().padLeft(2, '0')}/${hoy.year + 1}";
+
+    PdfColor bgColor = const PdfColor.fromInt(0xFF222222);
+    PdfColor accentColor = const PdfColor.fromInt(0xFFF5F5F5);
+    PdfColor accentColorMuted = const PdfColor(0.96, 0.96, 0.96, 0.7);
+    PdfColor borderOpacity = const PdfColor(0.95, 0.95, 0.95, 0.3);
+    String logoPath = 'assets/logob.png';
+
+    pw.MemoryImage? logoImage;
+    try {
+      final logoByteData = await rootBundle.load(logoPath);
+      logoImage = pw.MemoryImage(logoByteData.buffer.asUint8List());
+    } catch (_) {
+      // 🚨 CORRECCIÓN: Evita el bloque catch vacío
+    }
+
+    // FRENTE
+    pdf.addPage(
+      pw.Page(
+        pageFormat: const PdfPageFormat(
+          85.6 * PdfPageFormat.mm,
+          53.98 * PdfPageFormat.mm,
+          marginAll: 0,
+        ),
+        build: (pw.Context ctx) => pw.Container(
+          padding: const pw.EdgeInsets.all(3),
+          decoration: pw.BoxDecoration(color: bgColor),
+          child: pw.Container(
+            padding: const pw.EdgeInsets.all(2),
+            decoration: pw.BoxDecoration(
+              border: pw.Border.all(color: borderOpacity, width: 1.5),
+            ),
+            child: pw.Container(
+              decoration: pw.BoxDecoration(
+                border: pw.Border.all(color: borderOpacity, width: 0.5),
+              ),
+              child: pw.Center(
+                child: pw.Column(
+                  mainAxisAlignment: pw.MainAxisAlignment.center,
+                  children: [
+                    if (logoImage != null)
+                      pw.Image(logoImage, width: 60)
+                    else
+                      pw.Text(
+                        "JP",
+                        style: pw.TextStyle(fontSize: 30, color: accentColor),
+                      ),
+                    pw.SizedBox(height: 15),
+                    pw.Text(
+                      nombre,
+                      style: pw.TextStyle(
+                        fontSize: 11,
+                        fontWeight: pw.FontWeight.bold,
+                        letterSpacing: 1.5,
+                        color: accentColor,
+                      ),
+                    ),
+                    pw.SizedBox(height: 3),
+                    pw.Text(
+                      "GRACIAS POR CONFIAR EN MANOS MEXICANAS",
+                      style: pw.TextStyle(fontSize: 5, color: accentColorMuted),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
 
-    // Manda el diseño a la impresora/PDF
-    await Printing.layoutPdf(
-      onLayout: (PdfPageFormat format) async => pdf.save(),
+    // REVERSO
+    pdf.addPage(
+      pw.Page(
+        pageFormat: const PdfPageFormat(
+          85.6 * PdfPageFormat.mm,
+          53.98 * PdfPageFormat.mm,
+          marginAll: 0,
+        ),
+        build: (pw.Context ctx) => pw.Container(
+          padding: const pw.EdgeInsets.all(3),
+          decoration: pw.BoxDecoration(color: bgColor),
+          child: pw.Container(
+            padding: const pw.EdgeInsets.all(2),
+            decoration: pw.BoxDecoration(
+              border: pw.Border.all(color: borderOpacity, width: 1.5),
+            ),
+            child: pw.Container(
+              padding: const pw.EdgeInsets.all(10),
+              decoration: pw.BoxDecoration(
+                border: pw.Border.all(color: borderOpacity, width: 0.5),
+              ),
+              child: pw.Column(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(
+                    "COMPRANDO NACIONAL GANAMOS TODOS",
+                    style: pw.TextStyle(
+                      fontSize: 6,
+                      fontWeight: pw.FontWeight.bold,
+                      color: accentColor,
+                    ),
+                  ),
+                  pw.Center(
+                    child: pw.Container(
+                      padding: const pw.EdgeInsets.all(3),
+                      decoration: pw.BoxDecoration(
+                        color: PdfColors.white,
+                        borderRadius: pw.BorderRadius.circular(4),
+                      ),
+                      child: pw.BarcodeWidget(
+                        barcode: pw.Barcode.qrCode(),
+                        data: qrData,
+                        width: 65,
+                        height: 65,
+                      ),
+                    ),
+                  ),
+                  pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: pw.CrossAxisAlignment.end,
+                    children: [
+                      pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text(
+                            "EMITIDA",
+                            style: pw.TextStyle(
+                              fontSize: 4,
+                              color: accentColorMuted,
+                            ),
+                          ),
+                          pw.Text(
+                            emitido,
+                            style: pw.TextStyle(
+                              fontSize: 6,
+                              fontWeight: pw.FontWeight.bold,
+                              color: accentColor,
+                            ),
+                          ),
+                        ],
+                      ),
+                      pw.Text(
+                        "ID: $qrData",
+                        style: pw.TextStyle(
+                          fontSize: 6,
+                          fontWeight: pw.FontWeight.bold,
+                          color: accentColor,
+                        ),
+                      ),
+                      pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.end,
+                        children: [
+                          pw.Text(
+                            "VENCE",
+                            style: pw.TextStyle(
+                              fontSize: 4,
+                              color: accentColorMuted,
+                            ),
+                          ),
+                          pw.Text(
+                            vence,
+                            style: pw.TextStyle(
+                              fontSize: 6,
+                              fontWeight: pw.FontWeight.bold,
+                              color: accentColor,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
+
+    // 🚨 CORRECCIÓN: Se eliminó el 'async' redundante de esta función
+    await Printing.layoutPdf(onLayout: (PdfPageFormat format) => pdf.save());
   }
 
   // ===========================================================================
@@ -537,10 +699,7 @@ class _OficinaVipViewState extends State<OficinaVipView> {
                           crossAxisSpacing: 24,
                           mainAxisSpacing: 24,
                           shrinkWrap: true,
-                          childAspectRatio:
-                              MediaQuery.of(context).size.width > 800
-                              ? 2.2
-                              : 1.5,
+                          childAspectRatio: 2.2,
                           physics: const NeverScrollableScrollPhysics(),
                           children: [
                             _construirTarjetaConfigDual(
@@ -585,7 +744,7 @@ class _OficinaVipViewState extends State<OficinaVipView> {
                                     color: Colors.white,
                                   )
                                 : const Icon(Icons.save),
-                            label: const Text('GUARDAR CONFIGURACIÓN'),
+                            label: const Text('GUARDAR AJUSTES DE CASHBACK'),
                             onPressed: _guardando
                                 ? null
                                 : _guardarConfiguracion,
@@ -595,62 +754,93 @@ class _OficinaVipViewState extends State<OficinaVipView> {
                     ),
                   ),
 
-            // PESTAÑA 2: BASE DE DATOS Y BOTÓN DE PDF
+            // PESTAÑA 2: BASE DE DATOS Y FABRICA DE STOCK
             _cargandoTodo
                 ? const Center(child: CircularProgressIndicator())
                 : Container(
                     padding: const EdgeInsets.all(24),
-                    child: Card(
-                      elevation: 2,
-                      child: ListView(
-                        children: [
-                          DataTable(
+                    child: ListView(
+                      children: [
+                        Card(
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            side: const BorderSide(color: Colors.black12),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(20),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Row(
+                                  children: [
+                                    Icon(Icons.factory_outlined, size: 20),
+                                    SizedBox(width: 8),
+                                    Text(
+                                      'FÁBRICA DE TARJETAS (STOCK FÍSICO)',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w900,
+                                        letterSpacing: 1,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 15),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: OutlinedButton.icon(
+                                        icon: const Icon(
+                                          Icons.print,
+                                          color: Colors.grey,
+                                        ),
+                                        label: const Text(
+                                          'GENERAR LOTE PLATA (1-)',
+                                          style: TextStyle(color: Colors.black),
+                                        ),
+                                        onPressed: () =>
+                                            _mostrarDialogoLotes('plata'),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: OutlinedButton.icon(
+                                        icon: const Icon(
+                                          Icons.print,
+                                          color: Colors.amber,
+                                        ),
+                                        label: const Text(
+                                          'GENERAR LOTE ORO (2-)',
+                                          style: TextStyle(color: Colors.black),
+                                        ),
+                                        onPressed: () =>
+                                            _mostrarDialogoLotes('oro'),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        Card(
+                          elevation: 2,
+                          child: DataTable(
                             headingRowColor: WidgetStateProperty.all(
                               Colors.grey.shade200,
                             ),
                             columns: const [
-                              DataColumn(
-                                label: Text(
-                                  'ID',
-                                  style: TextStyle(fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                              DataColumn(
-                                label: Text(
-                                  'Nombre',
-                                  style: TextStyle(fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                              DataColumn(
-                                label: Text(
-                                  'Nivel',
-                                  style: TextStyle(fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                              DataColumn(
-                                label: Text(
-                                  'Saldo',
-                                  style: TextStyle(fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                              DataColumn(
-                                label: Text(
-                                  'Compras',
-                                  style: TextStyle(fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                              DataColumn(
-                                label: Text(
-                                  'Acciones',
-                                  style: TextStyle(fontWeight: FontWeight.bold),
-                                ),
-                              ),
+                              DataColumn(label: Text('Nombre')),
+                              DataColumn(label: Text('Nivel')),
+                              DataColumn(label: Text('Saldo')),
+                              DataColumn(label: Text('Compras')),
+                              DataColumn(label: Text('Acciones')),
                             ],
                             rows: _clientes
                                 .map(
                                   (c) => DataRow(
                                     cells: [
-                                      DataCell(Text(c['id'].toString())),
                                       DataCell(
                                         Text(
                                           c['nombre'],
@@ -669,7 +859,15 @@ class _OficinaVipViewState extends State<OficinaVipView> {
                                               fontSize: 10,
                                             ),
                                           ),
-                                          backgroundColor: Colors.grey.shade300,
+                                          backgroundColor:
+                                              c['nivel_vip'] == 'titanio'
+                                              ? Colors.black
+                                              : Colors.grey.shade300,
+                                          labelStyle: TextStyle(
+                                            color: c['nivel_vip'] == 'titanio'
+                                                ? Colors.white
+                                                : Colors.black,
+                                          ),
                                         ),
                                       ),
                                       DataCell(
@@ -688,23 +886,25 @@ class _OficinaVipViewState extends State<OficinaVipView> {
                                         Row(
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
-                                            // 🚨 BOTÓN PARA GENERAR EL PDF CON EL DISEÑO DE TU LOGO
-                                            IconButton(
-                                              icon: const Icon(
-                                                Icons.print,
-                                                color: Colors.blueAccent,
+                                            if (c['nivel_vip'] == 'titanio')
+                                              IconButton(
+                                                icon: const Icon(
+                                                  Icons.print,
+                                                  color: Colors.black,
+                                                ),
+                                                tooltip:
+                                                    'Imprimir Titanio Black',
+                                                onPressed: () =>
+                                                    _generarPdfTitanioPersonalizada(
+                                                      c,
+                                                    ),
                                               ),
-                                              tooltip:
-                                                  'Generar Diseño PDF para Imprenta',
-                                              onPressed: () =>
-                                                  _generarPdfTarjeta(c),
-                                            ),
                                             IconButton(
                                               icon: const Icon(
                                                 Icons.delete,
                                                 color: Colors.red,
                                               ),
-                                              tooltip: 'Eliminar Cliente',
+                                              tooltip: 'Eliminar',
                                               onPressed: () =>
                                                   _eliminarCliente(c['id']),
                                             ),
@@ -716,8 +916,8 @@ class _OficinaVipViewState extends State<OficinaVipView> {
                                 )
                                 .toList(),
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
           ],

@@ -1,23 +1,132 @@
 import 'package:flutter/material.dart';
 import '../../services/api_service.dart';
 
+// 🚨 Enum para controlar la inteligencia de la pantalla
+enum ModoVista { escanear, registrar, info, traspaso }
+
 class RegistroVipView extends StatefulWidget {
-  const RegistroVipView({super.key});
+  // 🚨 Variables opcionales: Si la terminal de cobro manda al cajero aquí,
+  // la pantalla se pondrá automáticamente en "Modo Traspaso".
+  final String? qrViejoTraspaso;
+  final String? nivelTraspaso;
+
+  const RegistroVipView({super.key, this.qrViejoTraspaso, this.nivelTraspaso});
 
   @override
   State<RegistroVipView> createState() => _RegistroVipViewState();
 }
 
 class _RegistroVipViewState extends State<RegistroVipView> {
-  // Controladores Registro
+  final TextEditingController _qrController = TextEditingController();
   final TextEditingController _nombreController = TextEditingController();
   final TextEditingController _telefonoController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
-  bool _isLoading = false;
+  final FocusNode _qrFocusNode = FocusNode();
 
-  // Variables Ruleta
-  String _nivelRuleta = 'todos';
-  bool _girandoRuleta = false;
+  bool _isLoading = false;
+  ModoVista _modo = ModoVista.escanear;
+  String _qrActual = '';
+  Map<String, dynamic>? _infoCliente;
+
+  @override
+  void initState() {
+    super.initState();
+    // Si viene rebotado de la caja por una alerta de 10 compras...
+    if (widget.qrViejoTraspaso != null && widget.nivelTraspaso != null) {
+      _modo = ModoVista.traspaso;
+    }
+    // Forzamos el foco en el campo oculto para que la pistola láser funcione directo
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _qrFocusNode.requestFocus();
+    });
+  }
+
+  @override
+  void dispose() {
+    _qrController.dispose();
+    _nombreController.dispose();
+    _telefonoController.dispose();
+    _emailController.dispose();
+    _qrFocusNode.dispose();
+    super.dispose();
+  }
+
+  // =========================================================================
+  // 🧠 CEREBRO DEL ESCÁNER (Determina qué hacer con el QR)
+  // =========================================================================
+  Future<void> _procesarQR(String qrEscaneado) async {
+    final qr = qrEscaneado.trim();
+    if (qr.isEmpty) return;
+
+    setState(() => _isLoading = true);
+
+    try {
+      if (_modo == ModoVista.traspaso) {
+        // 🚨 REGLA DE SEGURIDAD FÍSICA: Oro=2, Titanio=3
+        String prefijoEsperado = widget.nivelTraspaso == 'oro' ? '2' : '3';
+
+        if (!qr.startsWith('$prefijoEsperado-')) {
+          throw Exception(
+            'La tarjeta física es incorrecta. Saca una virgen de nivel ${widget.nivelTraspaso?.toUpperCase()} (Debe iniciar con $prefijoEsperado-).',
+          );
+        }
+
+        var res = await ApiService.traspasarVIP(
+          widget.qrViejoTraspaso!,
+          qr,
+          widget.nivelTraspaso!,
+        );
+
+        if (!mounted) return;
+        if (res['exito'] == true) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                '✅ Traspaso exitoso a Nivel ${widget.nivelTraspaso?.toUpperCase()}',
+              ),
+              backgroundColor: Colors.green,
+            ),
+          );
+          setState(() {
+            _modo = ModoVista.escanear; // Regresa a la normalidad
+            _qrController.clear();
+          });
+        } else {
+          throw Exception(res['error'] ?? 'Error desconocido');
+        }
+      } else {
+        // MODO NORMAL: Averiguar si la tarjeta es virgen o ya tiene dueño
+        var res = await ApiService.consultarQRVIP(qr);
+        if (!mounted) return;
+
+        if (res['registrado'] == true) {
+          setState(() {
+            _infoCliente = res['cliente'];
+            _modo = ModoVista.info; // Ya tiene dueño
+          });
+        } else {
+          setState(() {
+            _qrActual = qr;
+            _modo = ModoVista.registrar; // Está virgen, pide datos
+          });
+        }
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString().replaceAll('Exception: ', '')),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+        _qrController.clear();
+        _qrFocusNode.requestFocus();
+      }
+    }
+  }
 
   Future<void> _registrarCliente() async {
     final nombre = _nombreController.text.trim();
@@ -36,38 +145,44 @@ class _RegistroVipViewState extends State<RegistroVipView> {
 
     setState(() => _isLoading = true);
 
-    final sm = ScaffoldMessenger.of(context);
-
     try {
-      var res = await ApiService.registrarVIP(nombre, email, telefono);
+      // 🚨 Ahora mandamos el QR FÍSICO en lugar de inventar uno
+      var res = await ApiService.registrarVIP(
+        nombre,
+        email,
+        telefono,
+        _qrActual,
+      );
 
       if (!mounted) return;
 
       if (res['exito'] == true) {
-        sm.showSnackBar(
+        ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text(
-              '✅ VIP Registrado. Tarjeta digital enviada con éxito.',
-            ),
+            content: Text('✅ Tarjeta vinculada exitosamente'),
             backgroundColor: Colors.green,
           ),
         );
-        _nombreController.clear();
-        _telefonoController.clear();
-        _emailController.clear();
+        setState(() {
+          _modo = ModoVista.escanear;
+          _nombreController.clear();
+          _telefonoController.clear();
+          _emailController.clear();
+          _qrActual = '';
+        });
       } else {
-        sm.showSnackBar(
+        ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('❌ Error: ${res['error']}'),
             backgroundColor: Colors.red,
           ),
         );
       }
-    } catch (e) {
+    } catch (_) {
       if (!mounted) return;
-      sm.showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Error de red al conectar con el Cerebro.'),
+          content: Text('❌ Error de conexión'),
           backgroundColor: Colors.red,
         ),
       );
@@ -76,346 +191,311 @@ class _RegistroVipViewState extends State<RegistroVipView> {
     }
   }
 
-  Future<void> _girarRuleta() async {
-    setState(() => _girandoRuleta = true);
+  // =========================================================================
+  // 🎨 BLOQUES DE INTERFAZ INTELIGENTE
+  // =========================================================================
 
-    final sm = ScaffoldMessenger.of(context);
-
-    try {
-      final res = await ApiService.sortearVIP(_nivelRuleta);
-
-      // Simulamos suspenso en la tienda
-      await Future.delayed(const Duration(seconds: 2));
-
-      if (!mounted) return;
-
-      if (res['exito'] == true) {
-        _mostrarDialogoGanador(res['ganador']);
-      } else {
-        sm.showSnackBar(
-          SnackBar(
-            content: Text('❌ ${res['error']}'),
-            backgroundColor: Colors.red,
+  Widget _buildEscanear() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.qr_code_scanner, size: 80, color: Colors.black87),
+        const SizedBox(height: 24),
+        const Text(
+          'ESCANEA UNA TARJETA VIP',
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 1.5,
           ),
-        );
-      }
-    } catch (e) {
-      if (!mounted) return;
-      sm.showSnackBar(
-        const SnackBar(
-          content: Text('Error al conectar con la ruleta.'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    } finally {
-      if (mounted) setState(() => _girandoRuleta = false);
-    }
-  }
-
-  void _mostrarDialogoGanador(Map<String, dynamic> ganador) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: const BorderSide(color: Colors.amber, width: 2),
-        ),
-        title: const Text(
-          '🎉 ¡TENEMOS UN GANADOR!',
           textAlign: TextAlign.center,
-          style: TextStyle(fontWeight: FontWeight.bold),
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.stars, color: Colors.amber, size: 60),
-            const SizedBox(height: 15),
-            Text(
-              ganador['nombre'].toString().toUpperCase(),
-              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 5),
-            Text(
-              'Nivel: ${ganador['nivel_vip'].toString().toUpperCase()}',
-              style: const TextStyle(
-                color: Colors.grey,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 5),
-            Text(ganador['email'], style: const TextStyle(color: Colors.blue)),
-          ],
+        const SizedBox(height: 10),
+        const Text(
+          'El sistema detectará si la tarjeta es nueva (virgen) o si ya pertenece a un cliente activo.',
+          style: TextStyle(color: Colors.grey),
+          textAlign: TextAlign.center,
         ),
-        actionsAlignment: MainAxisAlignment.center,
-        actions: [
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.black,
-              foregroundColor: Colors.white,
+        const SizedBox(height: 30),
+        SizedBox(
+          width: 350,
+          child: TextField(
+            controller: _qrController,
+            focusNode: _qrFocusNode,
+            autofocus: true,
+            decoration: const InputDecoration(
+              labelText: 'Pistola Láser / Código QR',
+              prefixIcon: Icon(Icons.camera_alt),
+              border: OutlineInputBorder(),
             ),
-            onPressed: () => Navigator.pop(context),
-            child: const Text(
-              '¡Felicidades!',
-              style: TextStyle(letterSpacing: 1),
-            ),
+            onSubmitted: _procesarQR,
           ),
-        ],
-      ),
+        ),
+        if (_isLoading)
+          const Padding(
+            padding: EdgeInsets.all(20),
+            child: CircularProgressIndicator(color: Colors.black),
+          ),
+      ],
     );
   }
 
-  @override
-  void dispose() {
-    _nombreController.dispose();
-    _telefonoController.dispose();
-    _emailController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    bool isMobile = MediaQuery.of(context).size.width < 800;
-
-    Widget panelRegistro = Container(
-      padding: const EdgeInsets.all(32),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.amber.shade400, width: 1.5),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 15,
-            spreadRadius: 2,
-            offset: const Offset(0, 5),
+  Widget _buildRegistrar() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'NUEVO SOCIO VIP',
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 1.5,
           ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.workspace_premium, size: 60, color: Colors.amber),
-          const SizedBox(height: 10),
-          const Text(
-            'NUEVO CLIENTE VIP',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 2,
-            ),
-          ),
-          const SizedBox(height: 5),
-          const Text(
-            'Registra al cliente para enviarle su Tarjeta Plata al instante con su bono de bienvenida.',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.grey, fontSize: 13),
-          ),
-          const SizedBox(height: 30),
-          TextField(
-            controller: _nombreController,
-            textCapitalization: TextCapitalization.words,
-            decoration: const InputDecoration(
-              labelText: 'Nombre Completo',
-              border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.person_outline),
-              filled: true,
-              fillColor: Color(0xFFF9F9F9),
-            ),
-          ),
-          const SizedBox(height: 15),
-          TextField(
-            controller: _telefonoController,
-            keyboardType: TextInputType.phone,
-            decoration: const InputDecoration(
-              labelText: 'Teléfono (WhatsApp)',
-              border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.phone_android),
-              filled: true,
-              fillColor: Color(0xFFF9F9F9),
-            ),
-          ),
-          const SizedBox(height: 15),
-          TextField(
-            controller: _emailController,
-            keyboardType: TextInputType.emailAddress,
-            decoration: const InputDecoration(
-              labelText: 'Correo Electrónico',
-              border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.email_outlined),
-              filled: true,
-              fillColor: Color(0xFFF9F9F9),
-            ),
-          ),
-          const SizedBox(height: 25),
-          SizedBox(
-            width: double.infinity,
-            height: 55,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.black,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              onPressed: _isLoading ? null : _registrarCliente,
-              child: _isLoading
-                  ? const SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(
-                        color: Colors.white,
-                        strokeWidth: 2,
-                      ),
-                    )
-                  : const Text(
-                      'CREAR TARJETA VIP',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1.5,
-                      ),
-                    ),
-            ),
-          ),
-        ],
-      ),
-    );
-
-    Widget panelRuleta = Container(
-      padding: const EdgeInsets.all(32),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF1A1A1A), Color(0xFF333333)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.2),
-            blurRadius: 15,
-            spreadRadius: 2,
-            offset: const Offset(0, 5),
+        const SizedBox(height: 20),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.blue.shade50,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.blue.shade200),
           ),
-        ],
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.casino, color: Colors.amber, size: 70),
-          const SizedBox(height: 15),
-          const Text(
-            'SORTEO EN TIENDA',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 22,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 2,
-            ),
-          ),
-          const SizedBox(height: 10),
-          const Text(
-            'Elige un nivel y presiona el botón para seleccionar a un cliente al azar y darle una sorpresa.',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.white70),
-          ),
-          const SizedBox(height: 40),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+          child: Row(
             children: [
-              const Text(
-                'Nivel:',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(width: 15),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<String>(
-                    value: _nivelRuleta,
-                    dropdownColor: Colors.white,
-                    items: const [
-                      DropdownMenuItem(
-                        value: 'todos',
-                        child: Text(
-                          'Todos',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                      DropdownMenuItem(value: 'plata', child: Text('Plata')),
-                      DropdownMenuItem(value: 'oro', child: Text('Oro')),
-                      DropdownMenuItem(
-                        value: 'titanio',
-                        child: Text('Titanio'),
-                      ),
-                    ],
-                    onChanged: (v) => setState(() => _nivelRuleta = v!),
+              const Icon(Icons.credit_card, color: Colors.blue),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Vinculando a tarjeta virgen:\n$_qrActual',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Colors.blue,
                   ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 40),
-          SizedBox(
-            height: 60,
-            width: double.infinity,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.amber,
-                foregroundColor: Colors.black,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(30),
+        ),
+        const SizedBox(height: 24),
+        TextField(
+          controller: _nombreController,
+          decoration: const InputDecoration(
+            labelText: 'Nombre Completo',
+            prefixIcon: Icon(Icons.person_outline),
+          ),
+        ),
+        const SizedBox(height: 16),
+        TextField(
+          controller: _telefonoController,
+          keyboardType: TextInputType.phone,
+          decoration: const InputDecoration(
+            labelText: 'Teléfono',
+            prefixIcon: Icon(Icons.phone),
+          ),
+        ),
+        const SizedBox(height: 16),
+        TextField(
+          controller: _emailController,
+          keyboardType: TextInputType.emailAddress,
+          decoration: const InputDecoration(
+            labelText: 'Correo Electrónico',
+            prefixIcon: Icon(Icons.email_outlined),
+          ),
+        ),
+        const SizedBox(height: 32),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: () => setState(() {
+                  _modo = ModoVista.escanear;
+                  _qrActual = '';
+                }),
+                child: const Text(
+                  'CANCELAR',
+                  style: TextStyle(color: Colors.black),
                 ),
-                elevation: 10,
               ),
-              onPressed: _girandoRuleta ? null : _girarRuleta,
-              child: _girandoRuleta
-                  ? const CircularProgressIndicator(color: Colors.black)
-                  : const Text(
-                      'GIRAR RULETA',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 2,
-                      ),
-                    ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.black,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: _isLoading ? null : _registrarCliente,
+                child: _isLoading
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(color: Colors.white),
+                      )
+                    : const Text('GUARDAR'),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTraspaso() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.upgrade, size: 80, color: Colors.amber.shade600),
+        const SizedBox(height: 24),
+        Text(
+          'ASCENSO A NIVEL ${widget.nivelTraspaso?.toUpperCase()}',
+          style: const TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 1.5,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 10),
+        Text(
+          'Transfiriendo datos de la tarjeta vieja:\n${widget.qrViejoTraspaso}',
+          style: const TextStyle(
+            color: Colors.grey,
+            fontWeight: FontWeight.bold,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 30),
+        const Text(
+          'Toma una tarjeta VIRGEN del nuevo nivel del cajón y escanéala aquí.',
+          style: TextStyle(color: Colors.black87, fontSize: 16),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 30),
+        SizedBox(
+          width: 350,
+          child: TextField(
+            controller: _qrController,
+            focusNode: _qrFocusNode,
+            autofocus: true,
+            decoration: const InputDecoration(
+              labelText: 'Escanear NUEVA Tarjeta',
+              prefixIcon: Icon(Icons.camera_alt),
+              border: OutlineInputBorder(),
+            ),
+            onSubmitted: _procesarQR,
+          ),
+        ),
+        if (_isLoading)
+          const Padding(
+            padding: EdgeInsets.all(20),
+            child: CircularProgressIndicator(color: Colors.black),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildInfo() {
+    if (_infoCliente == null) return const SizedBox.shrink();
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.verified_user, size: 80, color: Colors.green),
+        const SizedBox(height: 24),
+        const Text(
+          'TARJETA ACTIVA',
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 1.5,
+            color: Colors.green,
+          ),
+        ),
+        const SizedBox(height: 24),
+        ListTile(
+          leading: const Icon(Icons.person),
+          title: const Text('Nombre'),
+          subtitle: Text(
+            _infoCliente!['nombre'],
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+        ),
+        ListTile(
+          leading: const Icon(Icons.star),
+          title: const Text('Nivel'),
+          subtitle: Text(
+            _infoCliente!['nivel_vip'].toString().toUpperCase(),
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+        ),
+        ListTile(
+          leading: const Icon(Icons.account_balance_wallet),
+          title: const Text('Cashback Disponible'),
+          subtitle: Text(
+            '\$${_infoCliente!['saldo_cashback']}',
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Colors.green,
+              fontSize: 18,
             ),
           ),
-        ],
-      ),
+        ),
+        const SizedBox(height: 32),
+        ElevatedButton.icon(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.black,
+            foregroundColor: Colors.white,
+            minimumSize: const Size(double.infinity, 50),
+          ),
+          onPressed: () {
+            setState(() => _modo = ModoVista.escanear);
+            WidgetsBinding.instance.addPostFrameCallback(
+              (_) => _qrFocusNode.requestFocus(),
+            );
+          },
+          icon: const Icon(Icons.qr_code_scanner),
+          label: const Text('ESCANEAR OTRA TARJETA'),
+        ),
+      ],
     );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    Widget contenido;
+    switch (_modo) {
+      case ModoVista.escanear:
+        contenido = _buildEscanear();
+        break;
+      case ModoVista.registrar:
+        contenido = _buildRegistrar();
+        break;
+      case ModoVista.info:
+        contenido = _buildInfo();
+        break;
+      case ModoVista.traspaso:
+        contenido = _buildTraspaso();
+        break;
+    }
 
     return Scaffold(
       backgroundColor: Colors.grey.shade100,
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
-          child: isMobile
-              ? Column(
-                  children: [
-                    panelRegistro,
-                    const SizedBox(height: 24),
-                    panelRuleta,
-                  ],
-                )
-              : Row(
-                  // 🚨 CORRECCIÓN: Cambiado a start para que Flutter no intente estirarlo hasta el infinito
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Expanded(child: panelRegistro),
-                    const SizedBox(width: 24),
-                    Expanded(child: panelRuleta),
-                  ],
-                ),
+          child: Card(
+            elevation: 4,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(40),
+              child: SizedBox(
+                width: 500, // Una tarjeta blanca limpia en el centro
+                child: contenido,
+              ),
+            ),
+          ),
         ),
       ),
     );

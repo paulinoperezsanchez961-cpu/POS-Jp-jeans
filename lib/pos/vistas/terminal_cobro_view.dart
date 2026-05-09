@@ -12,6 +12,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import '../../services/api_service.dart';
 import '../utils/escaner_utils.dart';
+import 'registro_vip_view.dart';
 
 class TerminalCobroView extends StatefulWidget {
   final Function(double) onVentaExitosa;
@@ -51,7 +52,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
   String _vendedorAsociado = "";
   double _descuentoPorPieza = 0.0;
 
-  // 👑 VARIABLES DEL CLUB VIP
   Map<String, dynamic>? _clienteVIP;
   bool _usarSaldoVIP = false;
   double _saldoVipAGastar = 0.0;
@@ -68,7 +68,9 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     _cargarCarritoMemoria();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _buscadorFocus.requestFocus();
+      if (mounted) {
+        _buscadorFocus.requestFocus();
+      }
     });
   }
 
@@ -88,7 +90,9 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
   // 👑 PROCESAMIENTO DEL CÓDIGO QR VIP
   // =========================================================================
   Future<void> _procesarQRVip(String qrHash) async {
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
 
     _buscadorController.clear();
     showDialog(
@@ -103,7 +107,9 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
 
     try {
       var res = await ApiService.consultarVIP(qrHash);
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       nav.pop();
 
       if (res['exito'] == true) {
@@ -119,7 +125,9 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         );
       }
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       nav.pop();
       sm.showSnackBar(
         const SnackBar(
@@ -127,12 +135,17 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
           backgroundColor: Colors.red,
         ),
       );
+      debugPrint('Error procesando QR VIP: $e');
     }
-    if (mounted) _buscadorFocus.requestFocus();
+    if (mounted) {
+      _buscadorFocus.requestFocus();
+    }
   }
 
   void _mostrarOpcionesVIP(Map<String, dynamic> cliente, String qrHash) {
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
 
     bool tieneRopaLinea = carrito.any((item) => item['en_rebaja'] == false);
     double saldoDisponible =
@@ -145,8 +158,8 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
           borderRadius: BorderRadius.circular(16),
           side: const BorderSide(color: Colors.amber, width: 2),
         ),
-        title: Row(
-          children: const [
+        title: const Row(
+          children: [
             Icon(Icons.stars, color: Colors.amber, size: 30),
             SizedBox(width: 10),
             Text('CLIENTE VIP', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -259,8 +272,92 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         ],
       ),
     ).then((_) {
-      if (mounted) _buscadorFocus.requestFocus();
+      if (mounted) {
+        _buscadorFocus.requestFocus();
+      }
     });
+  }
+
+  // =========================================================================
+  // 🚨 LA ALERTA MÁGICA DEL TRASPASO
+  // =========================================================================
+  void _mostrarAlertaTraspaso(String qrViejo, String nuevoNivel) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext traspasoCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(
+            color: nuevoNivel == 'oro' ? Colors.amber : Colors.black,
+            width: 3,
+          ),
+        ),
+        title: Row(
+          children: [
+            Icon(
+              Icons.upgrade,
+              color: nuevoNivel == 'oro' ? Colors.amber : Colors.black,
+              size: 35,
+            ),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text(
+                '¡CLIENTE CALIFICA A UPGRADE!',
+                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          'Este cliente acaba de alcanzar las compras necesarias.\n\n'
+          'Es necesario actualizar su tarjeta física al Nivel ${nuevoNivel.toUpperCase()}.\n\n'
+          'Presiona OK para abrir el escáner de traspasos.',
+          style: const TextStyle(fontSize: 15),
+        ),
+        actionsAlignment: MainAxisAlignment.center,
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.black,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
+            ),
+            onPressed: () {
+              Navigator.pop(traspasoCtx);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (BuildContext contextRuta) => Scaffold(
+                    appBar: AppBar(
+                      title: const Text(
+                        'TRASPASO DE TARJETA',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.5,
+                        ),
+                      ),
+                      leading: IconButton(
+                        icon: const Icon(Icons.arrow_back),
+                        onPressed: () => Navigator.pop(contextRuta),
+                      ),
+                    ),
+                    body: RegistroVipView(
+                      qrViejoTraspaso: qrViejo,
+                      nivelTraspaso: nuevoNivel,
+                    ),
+                  ),
+                ),
+              );
+            },
+            child: const Text(
+              'OK, ACTUALIZAR AHORA',
+              style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   // =========================================================================
@@ -269,7 +366,9 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
   Future<void> _cargarCatalogoDesdeCerebro() async {
     try {
       var res = await http.get(Uri.parse('${ApiService.baseUrl}/pos/catalogo'));
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       if (res.statusCode == 200) {
         var data = jsonDecode(res.body);
         if (data['exito'] == true) {
@@ -349,7 +448,9 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
   }
 
   Future<void> _escanearConCamara() async {
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
     final sm = ScaffoldMessenger.of(context);
     try {
       var result = await BarcodeScanner.scan();
@@ -370,6 +471,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         );
         _buscadorFocus.requestFocus();
       }
+      debugPrint('Error cámara: $e');
     }
   }
 
@@ -377,7 +479,9 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     Map<String, dynamic> p,
     List<Map<String, dynamic>> tallasBD,
   ) {
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
 
     showDialog(
       context: context,
@@ -411,17 +515,22 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         );
       },
     ).then((_) {
-      if (mounted) _buscadorFocus.requestFocus();
+      if (mounted) {
+        _buscadorFocus.requestFocus();
+      }
     });
   }
 
   void _agregarAlCarrito(String codigoOBusqueda) {
     if (codigoOBusqueda.isEmpty) {
-      if (mounted) _buscadorFocus.requestFocus();
+      if (mounted) {
+        _buscadorFocus.requestFocus();
+      }
       return;
     }
 
-    if (RegExp(r'^[123]\d{7,}$').hasMatch(codigoOBusqueda)) {
+    if (RegExp(r'^[123]\d{7,}$').hasMatch(codigoOBusqueda) ||
+        RegExp(r'^[123]-').hasMatch(codigoOBusqueda)) {
       _procesarQRVip(codigoOBusqueda);
       return;
     }
@@ -447,7 +556,9 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
       }
       _ejecutarAgregarAlCarrito(p, tallaLimpia, tallasBD);
     } else {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Prenda no encontrada'),
@@ -455,7 +566,9 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         ),
       );
       _buscadorController.clear();
-      if (mounted) _buscadorFocus.requestFocus();
+      if (mounted) {
+        _buscadorFocus.requestFocus();
+      }
     }
   }
 
@@ -488,7 +601,9 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         : 0;
 
     if (stockDisponible <= cantidadActual) {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Sin stock suficiente de la talla $tallaRealVisual'),
@@ -496,7 +611,9 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         ),
       );
       _buscadorController.clear();
-      if (mounted) _buscadorFocus.requestFocus();
+      if (mounted) {
+        _buscadorFocus.requestFocus();
+      }
       return;
     }
 
@@ -532,7 +649,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text(
-                'El saldo VIP solo se puede gastar si hay productos de línea. El modo cambió a ACUMULAR.',
+                'El saldo VIP solo se puede gastar si hay productos de línea.',
               ),
               backgroundColor: Colors.orange,
             ),
@@ -543,7 +660,9 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
       _recalcularTotal();
       _buscadorController.clear();
       _guardarCarritoMemoria();
-      if (mounted) _buscadorFocus.requestFocus();
+      if (mounted) {
+        _buscadorFocus.requestFocus();
+      }
     });
   }
 
@@ -591,7 +710,9 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         }
       }
     });
-    if (mounted) _buscadorFocus.requestFocus();
+    if (mounted) {
+      _buscadorFocus.requestFocus();
+    }
   }
 
   void _quitarDelCarrito(int index) {
@@ -615,12 +736,18 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
       _recalcularTotal();
       _guardarCarritoMemoria();
     });
-    if (mounted) _buscadorFocus.requestFocus();
+    if (mounted) {
+      _buscadorFocus.requestFocus();
+    }
   }
 
   Future<void> _aplicarCupon() async {
-    if (!mounted) return;
-    if (carrito.isEmpty) return;
+    if (!mounted) {
+      return;
+    }
+    if (carrito.isEmpty) {
+      return;
+    }
 
     String codigoIngresado = _cuponController.text.trim().toUpperCase();
     final sm = ScaffoldMessenger.of(context);
@@ -637,7 +764,9 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
           backgroundColor: Colors.blue,
         ),
       );
-      if (mounted) _buscadorFocus.requestFocus();
+      if (mounted) {
+        _buscadorFocus.requestFocus();
+      }
       return;
     }
 
@@ -645,7 +774,9 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
       var res = await http.get(
         Uri.parse('${ApiService.baseUrl}/cupones/validar/$codigoIngresado'),
       );
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       var data = jsonDecode(res.body);
 
@@ -676,15 +807,20 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         );
       }
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       sm.showSnackBar(
         const SnackBar(
           content: Text('Error al conectar con servidor'),
           backgroundColor: Colors.orange,
         ),
       );
+      debugPrint('Error cupón: $e');
     } finally {
-      if (mounted) _buscadorFocus.requestFocus();
+      if (mounted) {
+        _buscadorFocus.requestFocus();
+      }
     }
   }
 
@@ -731,8 +867,12 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
   }
 
   Future<void> _iniciarCobroTerminalMP() async {
-    if (!mounted) return;
-    if (carrito.isEmpty || _procesandoCobro) return;
+    if (!mounted) {
+      return;
+    }
+    if (carrito.isEmpty || _procesandoCobro) {
+      return;
+    }
 
     setState(() => _procesandoCobro = true);
 
@@ -746,9 +886,9 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         return PopScope(
           canPop: false,
           child: AlertDialog(
-            content: Column(
+            content: const Column(
               mainAxisSize: MainAxisSize.min,
-              children: const [
+              children: [
                 CircularProgressIndicator(color: Colors.blue),
                 SizedBox(height: 20),
                 Text(
@@ -775,83 +915,92 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         body: jsonEncode({"total": _total}),
       );
 
-      if (!mounted) return;
-
+      if (!mounted) {
+        return;
+      }
       var data = jsonDecode(res.body);
 
       if (data['exito'] == true && data['intent_id'] != null) {
         String intentId = data['intent_id'];
 
-        _mpPollingTimer = Timer.periodic(const Duration(seconds: 3), (
-          timer,
-        ) async {
-          try {
-            var statusRes = await http.get(
-              Uri.parse('${ApiService.baseUrl}/pos/mp/estado-cobro/$intentId'),
-            );
-
-            if (!mounted) {
-              timer.cancel();
-              return;
-            }
-
-            var statusData = jsonDecode(statusRes.body);
-
-            if (statusData['exito'] == true) {
-              String estado = statusData['estado'];
-              String estadoPago = statusData['estado_pago'] ?? 'desconocido';
-
-              if (estado == 'FINISHED') {
+        _mpPollingTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
+          Future<void> verificarEstado() async {
+            try {
+              var statusRes = await http.get(
+                Uri.parse(
+                  '${ApiService.baseUrl}/pos/mp/estado-cobro/$intentId',
+                ),
+              );
+              if (!mounted) {
                 timer.cancel();
-                nav.pop();
+                return;
+              }
+              var statusData = jsonDecode(statusRes.body);
 
-                if (estadoPago == 'approved') {
-                  _ejecutarCobroEImprimirTicket(
-                    metodo: "Tarjeta MP",
-                    mpIntentId: intentId,
-                  );
-                } else {
+              if (statusData['exito'] == true) {
+                String estado = statusData['estado'];
+                String estadoPago = statusData['estado_pago'] ?? 'desconocido';
+
+                if (estado == 'FINISHED') {
+                  timer.cancel();
+                  nav.pop();
+
+                  if (estadoPago == 'approved') {
+                    _ejecutarCobroEImprimirTicket(
+                      metodo: "Tarjeta MP",
+                      mpIntentId: intentId,
+                    );
+                  } else {
+                    sm.showSnackBar(
+                      SnackBar(
+                        content: Text('❌ Pago RECHAZADO ($estadoPago).'),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                    setState(() => _procesandoCobro = false);
+                    if (mounted) {
+                      _buscadorFocus.requestFocus();
+                    }
+                  }
+                } else if (estado == 'CANCELED' || estado == 'ERROR') {
+                  timer.cancel();
+                  nav.pop();
                   sm.showSnackBar(
                     SnackBar(
                       content: Text(
-                        '❌ Pago RECHAZADO por el banco ($estadoPago). Revisa la tarjeta o fondos.',
+                        '❌ Pago cancelado en la terminal ($estado)',
                       ),
                       backgroundColor: Colors.red,
-                      duration: const Duration(seconds: 5),
                     ),
                   );
                   setState(() => _procesandoCobro = false);
-                  if (mounted) _buscadorFocus.requestFocus();
+                  if (mounted) {
+                    _buscadorFocus.requestFocus();
+                  }
                 }
-              } else if (estado == 'CANCELED' || estado == 'ERROR') {
+              }
+            } catch (e) {
+              if (!mounted) {
                 timer.cancel();
-                nav.pop();
-                sm.showSnackBar(
-                  SnackBar(
-                    content: Text('❌ Pago cancelado en la terminal ($estado)'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
-                setState(() => _procesandoCobro = false);
-                if (mounted) _buscadorFocus.requestFocus();
+                return;
+              }
+              timer.cancel();
+              nav.pop();
+              setState(() => _procesandoCobro = false);
+              sm.showSnackBar(
+                const SnackBar(
+                  content: Text('Error al consultar estado a Mercado Pago'),
+                  backgroundColor: Colors.red,
+                ),
+              );
+              debugPrint('Error status MP: $e');
+              if (mounted) {
+                _buscadorFocus.requestFocus();
               }
             }
-          } catch (e) {
-            if (!mounted) {
-              timer.cancel();
-              return;
-            }
-            timer.cancel();
-            nav.pop();
-            setState(() => _procesandoCobro = false);
-            sm.showSnackBar(
-              const SnackBar(
-                content: Text('Error al consultar estado a Mercado Pago'),
-                backgroundColor: Colors.red,
-              ),
-            );
-            if (mounted) _buscadorFocus.requestFocus();
           }
+
+          verificarEstado();
         });
       } else {
         nav.pop();
@@ -862,27 +1011,39 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
             backgroundColor: Colors.red,
           ),
         );
-        if (mounted) _buscadorFocus.requestFocus();
+        if (mounted) {
+          _buscadorFocus.requestFocus();
+        }
       }
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       nav.pop();
       setState(() => _procesandoCobro = false);
       sm.showSnackBar(
-        SnackBar(
-          content: Text('Error de red: $e'),
+        const SnackBar(
+          content: Text('Error de red'),
           backgroundColor: Colors.red,
         ),
       );
-      if (mounted) _buscadorFocus.requestFocus();
+      debugPrint('Error init MP: $e');
+      if (mounted) {
+        _buscadorFocus.requestFocus();
+      }
     }
   }
 
+  // =========================================================================
+  // 🖨️ MOTOR DE IMPRESIÓN DEL TICKET
+  // =========================================================================
   Future<void> _ejecutarCobroEImprimirTicket({
     required String metodo,
     String? mpIntentId,
   }) async {
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
 
     double pagoEf = 0.0;
     double pagoTr = 0.0;
@@ -898,7 +1059,9 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
             backgroundColor: Colors.orange,
           ),
         );
-        if (mounted) _buscadorFocus.requestFocus();
+        if (mounted) {
+          _buscadorFocus.requestFocus();
+        }
         return;
       }
     } else if (metodo == "MIXTO") {
@@ -911,11 +1074,15 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
             backgroundColor: Colors.orange,
           ),
         );
-        if (mounted) _buscadorFocus.requestFocus();
+        if (mounted) {
+          _buscadorFocus.requestFocus();
+        }
         return;
       }
       double netoEfectivo = pagoEf - _cambio;
-      if (netoEfectivo < 0) netoEfectivo = 0;
+      if (netoEfectivo < 0) {
+        netoEfectivo = 0;
+      }
       metodoDB =
           "MIXTO (Efectivo: \$${netoEfectivo.toStringAsFixed(2)}, Transf: \$${pagoTr.toStringAsFixed(2)})";
     }
@@ -953,7 +1120,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
       if (mpIntentId != null) {
         bodyData["mp_intent_id"] = mpIntentId;
       }
-
       if (_clienteVIP != null) {
         bodyData["qr_vip"] = _clienteVIP!['qr_hash'];
         bodyData["monto_cashback_usado"] = _usarSaldoVIP ? _saldoVipAGastar : 0;
@@ -965,7 +1131,9 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         body: jsonEncode(bodyData),
       );
 
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       var data = jsonDecode(res.body);
 
       if (data['exito'] == true) {
@@ -978,12 +1146,21 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
             ? "Pago con Saldo VIP: -\$${_saldoVipAGastar.toStringAsFixed(2)}"
             : "";
 
+        final String? alertaTraspaso = data['alerta_traspaso'];
+        final String? qrViejo = _clienteVIP != null
+            ? _clienteVIP!['qr_hash']
+            : null;
+
         await _registrarVentaEnMemoria(
           carritoAEnviar,
           totalImpresion,
           _vendedorAsociado,
           metodoDB,
         );
+
+        if (!mounted) {
+          return;
+        }
         widget.onVentaExitosa(_total);
 
         setState(() {
@@ -1053,29 +1230,29 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                       fontWeight: pw.FontWeight.bold,
                     ),
                   ),
-                  pw.Divider(borderStyle: pw.BorderStyle.dashed),
-                  pw.ListView.builder(
-                    itemCount: carritoAEnviar.length,
-                    itemBuilder: (pdfCtx, i) {
-                      final item = carritoAEnviar[i];
-                      return pw.Row(
-                        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                        children: [
-                          pw.Expanded(
-                            child: pw.Text(
-                              '${item['cantidad']}x ${item['nombre']} [Talla: ${item['talla']}]',
-                              style: pw.TextStyle(fontSize: 8),
-                            ),
-                          ),
-                          pw.Text(
-                            '\$${(item['precio'] * item['cantidad']).toStringAsFixed(2)}',
+
+                  pw.Divider(),
+
+                  ...carritoAEnviar.map((item) {
+                    return pw.Row(
+                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                      children: [
+                        pw.Expanded(
+                          child: pw.Text(
+                            '${item['cantidad']}x ${item['nombre']} [Talla: ${item['talla']}]',
                             style: pw.TextStyle(fontSize: 8),
                           ),
-                        ],
-                      );
-                    },
-                  ),
-                  pw.Divider(borderStyle: pw.BorderStyle.dashed),
+                        ),
+                        pw.Text(
+                          '\$${(item['precio'] * item['cantidad']).toStringAsFixed(2)}',
+                          style: pw.TextStyle(fontSize: 8),
+                        ),
+                      ],
+                    );
+                  }), // 🚨 .toList() eliminado
+
+                  pw.Divider(),
+
                   if (descuentoTxt.isNotEmpty) ...[
                     pw.Text(descuentoTxt, style: pw.TextStyle(fontSize: 8)),
                     pw.SizedBox(height: 5),
@@ -1204,7 +1381,8 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                       ],
                     ),
                   ],
-                  pw.Divider(borderStyle: pw.BorderStyle.dashed),
+
+                  pw.Divider(),
                   pw.SizedBox(height: 5),
                   pw.Text(
                     '¡GRACIAS POR SU COMPRA!',
@@ -1213,7 +1391,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                       fontWeight: pw.FontWeight.bold,
                     ),
                   ),
-                  pw.SizedBox(height: 10),
+                  pw.SizedBox(height: 15 * PdfPageFormat.mm),
                 ],
               );
             },
@@ -1238,13 +1416,17 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
             await archivo.writeAsBytes(bytesPdf);
           }
         } catch (e) {
-          debugPrint('Aviso al guardar PDF: $e');
+          debugPrint('Aviso al guardar PDF local: $e');
         }
 
         await Printing.layoutPdf(
-          onLayout: (PdfPageFormat format) async => await doc.save(),
+          onLayout: (PdfPageFormat format) async => doc.save(),
           name: 'Ticket_JPJeans',
         );
+
+        if (alertaTraspaso != null && qrViejo != null && mounted) {
+          _mostrarAlertaTraspaso(qrViejo, alertaTraspaso);
+        }
       } else {
         sm.showSnackBar(
           SnackBar(
@@ -1255,25 +1437,35 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         );
       }
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       sm.showSnackBar(
         SnackBar(
           content: Text('❌ Error de red: $e'),
           backgroundColor: Colors.red,
         ),
       );
+      debugPrint('Error de cobro final: $e');
     } finally {
       if (mounted) {
         setState(() {
           _procesandoCobro = false;
         });
       }
-      if (mounted) _buscadorFocus.requestFocus();
+      if (mounted) {
+        _buscadorFocus.requestFocus();
+      }
     }
   }
 
+  // =========================================================================
+  // 🖨️ MOTOR DE IMPRESIÓN DEL CORTE DE CAJA
+  // =========================================================================
   Future<void> _imprimirCorteCaja() async {
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
     final sm = ScaffoldMessenger.of(context);
     final prefs = await SharedPreferences.getInstance();
 
@@ -1351,7 +1543,9 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         detalles: detallesCorte,
       );
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
       sm.showSnackBar(
         const SnackBar(
           content: Text(
@@ -1361,10 +1555,13 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
           duration: Duration(seconds: 6),
         ),
       );
+      debugPrint('Error corte red: $e');
       return;
     }
 
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
 
     final doc = pw.Document();
     pw.MemoryImage? imageLogo;
@@ -1404,7 +1601,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
               pw.Text('JP JEANS TLAXCALA', style: pw.TextStyle(fontSize: 10)),
               pw.SizedBox(height: 5),
               pw.Text(fechaHora, style: pw.TextStyle(fontSize: 8)),
-              pw.Divider(borderStyle: pw.BorderStyle.dashed),
+              pw.Divider(),
 
               if (detalles.isNotEmpty) ...[
                 pw.SizedBox(height: 5),
@@ -1445,7 +1642,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                             vendedor != '' ? 'Vend: $vendedor' : '',
                             style: pw.TextStyle(
                               fontSize: 8,
-                              color: PdfColors.grey700,
+                              color: PdfColors.grey,
                             ),
                           ),
                         ],
@@ -1465,8 +1662,8 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                       pw.SizedBox(height: 4),
                     ],
                   );
-                }),
-                pw.Divider(borderStyle: pw.BorderStyle.dashed),
+                }), // 🚨 .toList() eliminado
+                pw.Divider(),
               ],
 
               if (apartados.isNotEmpty) ...[
@@ -1495,8 +1692,8 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                       ),
                     ],
                   ),
-                ),
-                pw.Divider(borderStyle: pw.BorderStyle.dashed),
+                ), // 🚨 .toList() eliminado
+                pw.Divider(),
               ],
 
               if (cambios.isNotEmpty) ...[
@@ -1523,16 +1720,13 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                       ),
                       pw.Text(
                         'Motivo: ${item['motivo']}',
-                        style: pw.TextStyle(
-                          fontSize: 7,
-                          color: PdfColors.grey700,
-                        ),
+                        style: pw.TextStyle(fontSize: 7, color: PdfColors.grey),
                       ),
                       pw.SizedBox(height: 3),
                     ],
                   ),
-                ),
-                pw.Divider(borderStyle: pw.BorderStyle.dashed),
+                ), // 🚨 .toList() eliminado
+                pw.Divider(),
               ],
 
               if (gastosLista.isNotEmpty) ...[
@@ -1565,8 +1759,8 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                       ),
                     ],
                   ),
-                ),
-                pw.Divider(borderStyle: pw.BorderStyle.dashed),
+                ), // 🚨 .toList() eliminado
+                pw.Divider(),
               ],
 
               pw.SizedBox(height: 5),
@@ -1588,12 +1782,12 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
                   pw.Text(
-                    '  💳 En Tarjeta',
-                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
+                    '  En Tarjeta',
+                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey),
                   ),
                   pw.Text(
                     '\$${calcTarjeta.toStringAsFixed(2)}',
-                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
+                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey),
                   ),
                 ],
               ),
@@ -1601,12 +1795,12 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
                   pw.Text(
-                    '  📱 En Transferencia',
-                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
+                    '  En Transferencia',
+                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey),
                   ),
                   pw.Text(
                     '\$${calcTransferencia.toStringAsFixed(2)}',
-                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
+                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey),
                   ),
                 ],
               ),
@@ -1614,12 +1808,12 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
                   pw.Text(
-                    '  💵 En Efectivo',
-                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
+                    '  En Efectivo',
+                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey),
                   ),
                   pw.Text(
                     '\$${calcEfectivo.toStringAsFixed(2)}',
-                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey700),
+                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey),
                   ),
                 ],
               ),
@@ -1637,7 +1831,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                   ),
                 ],
               ),
-              pw.Divider(borderStyle: pw.BorderStyle.dashed),
+              pw.Divider(),
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
@@ -1657,7 +1851,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                   ),
                 ],
               ),
-              pw.SizedBox(height: 10),
+              pw.SizedBox(height: 15 * PdfPageFormat.mm),
             ],
           );
         },
@@ -1680,22 +1874,26 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         await archivo.writeAsBytes(bytesPdfCorte);
       }
     } catch (e) {
-      debugPrint('Aviso al guardar PDF: $e');
+      debugPrint('Aviso al guardar PDF corte local: $e');
     }
 
     await Printing.layoutPdf(
-      onLayout: (PdfPageFormat format) async => await doc.save(),
+      onLayout: (PdfPageFormat format) async => doc.save(),
       name: 'Corte_Caja_JPJeans',
     );
 
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
     widget.onCerrarCaja();
     await prefs.remove('caja_ventas_detalles');
     await prefs.remove('caja_apartados_detalles');
     await prefs.remove('caja_cambios_detalles');
     await prefs.remove('caja_lista_gastos');
 
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
     sm.showSnackBar(
       const SnackBar(
         content: Text('✅ Corte exitoso. Memoria de caja limpiada.'),
@@ -1774,9 +1972,9 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              Column(
+              const Column(
                 mainAxisAlignment: MainAxisAlignment.center,
-                children: const [
+                children: [
                   Icon(Icons.barcode_reader, color: Colors.green, size: 30),
                   SizedBox(height: 5),
                   Text(
@@ -1806,9 +2004,9 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                       color: Colors.black,
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Column(
+                    child: const Column(
                       mainAxisAlignment: MainAxisAlignment.center,
-                      children: const [
+                      children: [
                         Icon(Icons.camera_alt, color: Colors.white, size: 24),
                         SizedBox(height: 4),
                         Text(
@@ -1865,7 +2063,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                 : ListView.builder(
                     shrinkWrap: true,
                     itemCount: carrito.length,
-                    itemBuilder: (context, index) {
+                    itemBuilder: (BuildContext listCtx, int index) {
                       final item = carrito[index];
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 12.0),
