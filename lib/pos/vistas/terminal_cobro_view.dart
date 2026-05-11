@@ -2,16 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
-import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:barcode_scan2/barcode_scan2.dart';
 import 'package:http/http.dart' as http;
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
+
 import '../../services/api_service.dart';
 import '../utils/escaner_utils.dart';
+import '../utils/motor_impresion.dart';
 import 'registro_vip_view.dart';
 
 class TerminalCobroView extends StatefulWidget {
@@ -86,9 +83,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     super.dispose();
   }
 
-  // =========================================================================
-  // 👑 PROCESAMIENTO DEL CÓDIGO QR VIP
-  // =========================================================================
   Future<void> _procesarQRVip(String qrHash) async {
     if (!mounted) {
       return;
@@ -278,9 +272,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     });
   }
 
-  // =========================================================================
-  // 🚨 LA ALERTA MÁGICA DEL TRASPASO
-  // =========================================================================
   void _mostrarAlertaTraspaso(String qrViejo, String nuevoNivel) {
     showDialog(
       context: context,
@@ -360,9 +351,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     );
   }
 
-  // =========================================================================
-  // LOGICA NORMAL DEL POS
-  // =========================================================================
   Future<void> _cargarCatalogoDesdeCerebro() async {
     try {
       var res = await http.get(Uri.parse('${ApiService.baseUrl}/pos/catalogo'));
@@ -437,14 +425,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     });
 
     await prefs.setString('caja_ventas_detalles', jsonEncode(detalles));
-  }
-
-  Future<Directory?> _obtenerDirectorioBase() async {
-    if (Platform.isAndroid) {
-      return await getExternalStorageDirectory();
-    } else {
-      return await getApplicationDocumentsDirectory();
-    }
   }
 
   Future<void> _escanearConCamara() async {
@@ -1035,7 +1015,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
   }
 
   // =========================================================================
-  // 🖨️ MOTOR DE IMPRESIÓN DEL TICKET
+  // 🖨️ DELEGAMOS LA IMPRESIÓN AL MOTOR EXTERNO
   // =========================================================================
   Future<void> _ejecutarCobroEImprimirTicket({
     required String metodo,
@@ -1184,244 +1164,16 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         _guardarCarritoMemoria();
         _cargarCatalogoDesdeCerebro();
 
-        final doc = pw.Document();
-        pw.MemoryImage? imageLogo;
-        try {
-          imageLogo = pw.MemoryImage(
-            (await rootBundle.load('assets/logo.png')).buffer.asUint8List(),
-          );
-        } catch (e) {
-          debugPrint('Aviso Logo: $e');
-        }
-
-        final now = DateTime.now();
-        final fechaHora =
-            '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
-
-        doc.addPage(
-          pw.Page(
-            pageFormat: const PdfPageFormat(
-              80 * PdfPageFormat.mm,
-              double.infinity,
-              marginAll: 5 * PdfPageFormat.mm,
-            ),
-            build: (pw.Context pdfCtx) {
-              return pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.center,
-                mainAxisSize: pw.MainAxisSize.min,
-                children: [
-                  if (imageLogo != null)
-                    pw.Image(imageLogo, width: 40, height: 40),
-                  pw.SizedBox(height: 5),
-                  pw.Text(
-                    'JP JEANS',
-                    style: pw.TextStyle(
-                      fontSize: 16,
-                      fontWeight: pw.FontWeight.bold,
-                    ),
-                  ),
-                  pw.Text('TLAXCALA', style: pw.TextStyle(fontSize: 10)),
-                  pw.SizedBox(height: 5),
-                  pw.Text(fechaHora, style: pw.TextStyle(fontSize: 8)),
-                  pw.Text(
-                    'Método: ${metodoDB == "MIXTO" ? "PAGO MIXTO" : metodoDB}',
-                    style: pw.TextStyle(
-                      fontSize: 8,
-                      fontWeight: pw.FontWeight.bold,
-                    ),
-                  ),
-
-                  pw.Divider(),
-
-                  ...carritoAEnviar.map((item) {
-                    return pw.Row(
-                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                      children: [
-                        pw.Expanded(
-                          child: pw.Text(
-                            '${item['cantidad']}x ${item['nombre']} [Talla: ${item['talla']}]',
-                            style: pw.TextStyle(fontSize: 8),
-                          ),
-                        ),
-                        pw.Text(
-                          '\$${(item['precio'] * item['cantidad']).toStringAsFixed(2)}',
-                          style: pw.TextStyle(fontSize: 8),
-                        ),
-                      ],
-                    );
-                  }), // 🚨 .toList() eliminado
-
-                  pw.Divider(),
-
-                  if (descuentoTxt.isNotEmpty) ...[
-                    pw.Text(descuentoTxt, style: pw.TextStyle(fontSize: 8)),
-                    pw.SizedBox(height: 5),
-                  ],
-                  if (vipTxt.isNotEmpty) ...[
-                    pw.Text(
-                      vipTxt,
-                      style: pw.TextStyle(
-                        fontSize: 8,
-                        fontWeight: pw.FontWeight.bold,
-                      ),
-                    ),
-                    pw.SizedBox(height: 5),
-                  ],
-                  pw.Row(
-                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                    children: [
-                      pw.Text(
-                        'TOTAL',
-                        style: pw.TextStyle(
-                          fontSize: 12,
-                          fontWeight: pw.FontWeight.bold,
-                        ),
-                      ),
-                      pw.Text(
-                        '\$${totalImpresion.toStringAsFixed(2)}',
-                        style: pw.TextStyle(
-                          fontSize: 12,
-                          fontWeight: pw.FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                  pw.SizedBox(height: 5),
-
-                  if (metodo == "Efectivo") ...[
-                    pw.Row(
-                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                      children: [
-                        pw.Text('EFECTIVO', style: pw.TextStyle(fontSize: 8)),
-                        pw.Text(
-                          '\$${pagoEf.toStringAsFixed(2)}',
-                          style: pw.TextStyle(fontSize: 8),
-                        ),
-                      ],
-                    ),
-                    pw.Row(
-                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                      children: [
-                        pw.Text('CAMBIO', style: pw.TextStyle(fontSize: 8)),
-                        pw.Text(
-                          '\$${cambioImpresion.toStringAsFixed(2)}',
-                          style: pw.TextStyle(fontSize: 8),
-                        ),
-                      ],
-                    ),
-                  ] else if (metodo == "MIXTO") ...[
-                    pw.Row(
-                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                      children: [
-                        pw.Text(
-                          'TRANSFERENCIA',
-                          style: pw.TextStyle(fontSize: 8),
-                        ),
-                        pw.Text(
-                          '\$${pagoTr.toStringAsFixed(2)}',
-                          style: pw.TextStyle(fontSize: 8),
-                        ),
-                      ],
-                    ),
-                    pw.Row(
-                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                      children: [
-                        pw.Text(
-                          'EFECTIVO RECIBIDO',
-                          style: pw.TextStyle(fontSize: 8),
-                        ),
-                        pw.Text(
-                          '\$${pagoEf.toStringAsFixed(2)}',
-                          style: pw.TextStyle(fontSize: 8),
-                        ),
-                      ],
-                    ),
-                    pw.Row(
-                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                      children: [
-                        pw.Text(
-                          'CAMBIO EN EFECTIVO',
-                          style: pw.TextStyle(
-                            fontSize: 8,
-                            fontWeight: pw.FontWeight.bold,
-                          ),
-                        ),
-                        pw.Text(
-                          '\$${cambioImpresion.toStringAsFixed(2)}',
-                          style: pw.TextStyle(
-                            fontSize: 8,
-                            fontWeight: pw.FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ] else if (metodo == "Transferencia") ...[
-                    pw.Row(
-                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                      children: [
-                        pw.Text(
-                          'PAGO APROBADO',
-                          style: pw.TextStyle(fontSize: 8),
-                        ),
-                        pw.Text(
-                          'TRANSFERENCIA',
-                          style: pw.TextStyle(fontSize: 8),
-                        ),
-                      ],
-                    ),
-                  ] else ...[
-                    pw.Row(
-                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                      children: [
-                        pw.Text(
-                          'PAGO APROBADO',
-                          style: pw.TextStyle(fontSize: 8),
-                        ),
-                        pw.Text('TARJETA', style: pw.TextStyle(fontSize: 8)),
-                      ],
-                    ),
-                  ],
-
-                  pw.Divider(),
-                  pw.SizedBox(height: 5),
-                  pw.Text(
-                    '¡GRACIAS POR SU COMPRA!',
-                    style: pw.TextStyle(
-                      fontSize: 9,
-                      fontWeight: pw.FontWeight.bold,
-                    ),
-                  ),
-                  pw.SizedBox(height: 15 * PdfPageFormat.mm),
-                ],
-              );
-            },
-          ),
-        );
-
-        try {
-          final Uint8List bytesPdf = await doc.save();
-          final Directory? baseDir = await _obtenerDirectorioBase();
-          if (baseDir != null) {
-            final directorioTickets = Directory(
-              '${baseDir.path}/Tickets_Guardados',
-            );
-            if (!await directorioTickets.exists()) {
-              await directorioTickets.create(recursive: true);
-            }
-            final String nombreArchivo =
-                'Ticket_${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}_${now.second.toString().padLeft(2, '0')}.pdf';
-            final File archivo = File(
-              '${directorioTickets.path}/$nombreArchivo',
-            );
-            await archivo.writeAsBytes(bytesPdf);
-          }
-        } catch (e) {
-          debugPrint('Aviso al guardar PDF local: $e');
-        }
-
-        await Printing.layoutPdf(
-          onLayout: (PdfPageFormat format) async => doc.save(),
-          name: 'Ticket_JPJeans',
+        // 🚨 LLAMADA AL MOTOR DE IMPRESIÓN EXTERNO
+        await MotorImpresion.imprimirTicketVenta(
+          carritoAEnviar: carritoAEnviar,
+          metodoDB: metodoDB,
+          totalImpresion: totalImpresion,
+          pagoEf: pagoEf,
+          pagoTr: pagoTr,
+          cambioImpresion: cambioImpresion,
+          descuentoTxt: descuentoTxt,
+          vipTxt: vipTxt,
         );
 
         if (alertaTraspaso != null && qrViejo != null && mounted) {
@@ -1459,9 +1211,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     }
   }
 
-  // =========================================================================
-  // 🖨️ MOTOR DE IMPRESIÓN DEL CORTE DE CAJA
-  // =========================================================================
   Future<void> _imprimirCorteCaja() async {
     if (!mounted) {
       return;
@@ -1563,323 +1312,19 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
       return;
     }
 
-    final doc = pw.Document();
-    pw.MemoryImage? imageLogo;
-    try {
-      imageLogo = pw.MemoryImage(
-        (await rootBundle.load('assets/logo.png')).buffer.asUint8List(),
-      );
-    } catch (e) {
-      debugPrint('Aviso Logo: $e');
-    }
-
-    final now = DateTime.now();
-    final fechaHora =
-        '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
-
-    doc.addPage(
-      pw.Page(
-        pageFormat: const PdfPageFormat(
-          80 * PdfPageFormat.mm,
-          double.infinity,
-          marginAll: 5 * PdfPageFormat.mm,
-        ),
-        build: (pw.Context pdfCtx) {
-          return pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.center,
-            mainAxisSize: pw.MainAxisSize.min,
-            children: [
-              if (imageLogo != null) pw.Image(imageLogo, width: 40, height: 40),
-              pw.SizedBox(height: 5),
-              pw.Text(
-                'CORTE DE CAJA',
-                style: pw.TextStyle(
-                  fontSize: 14,
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
-              pw.Text('JP JEANS TLAXCALA', style: pw.TextStyle(fontSize: 10)),
-              pw.SizedBox(height: 5),
-              pw.Text(fechaHora, style: pw.TextStyle(fontSize: 8)),
-              pw.Divider(),
-
-              if (detalles.isNotEmpty) ...[
-                pw.SizedBox(height: 5),
-                pw.Text(
-                  'VENTAS DEL DÍA ($totalPiezas PZS)',
-                  style: pw.TextStyle(
-                    fontSize: 10,
-                    fontWeight: pw.FontWeight.bold,
-                  ),
-                ),
-                pw.SizedBox(height: 5),
-                ...detalles.map((item) {
-                  String line = item['nombre'].toString();
-                  String itemsVendidos = line.split('| Vendedor:')[0];
-                  String vendedor = line.split('| Vendedor:').length > 1
-                      ? line.split('| Vendedor:')[1]
-                      : '';
-
-                  return pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: [
-                      pw.Text(
-                        itemsVendidos.replaceAll('c/u.', 'c/u\n'),
-                        style: pw.TextStyle(fontSize: 8),
-                      ),
-                      pw.Row(
-                        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                        children: [
-                          pw.Text(
-                            '${item['metodo'] ?? 'Efectivo'}',
-                            style: pw.TextStyle(
-                              fontSize: 8,
-                              fontWeight: pw.FontWeight.bold,
-                              color: PdfColors.black,
-                            ),
-                          ),
-                          pw.Text(
-                            vendedor != '' ? 'Vend: $vendedor' : '',
-                            style: pw.TextStyle(
-                              fontSize: 8,
-                              color: PdfColors.grey,
-                            ),
-                          ),
-                        ],
-                      ),
-                      pw.Row(
-                        mainAxisAlignment: pw.MainAxisAlignment.end,
-                        children: [
-                          pw.Text(
-                            '\$${(item['precio'] as num).toDouble().toStringAsFixed(2)}',
-                            style: pw.TextStyle(
-                              fontSize: 9,
-                              fontWeight: pw.FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                      pw.SizedBox(height: 4),
-                    ],
-                  );
-                }), // 🚨 .toList() eliminado
-                pw.Divider(),
-              ],
-
-              if (apartados.isNotEmpty) ...[
-                pw.SizedBox(height: 5),
-                pw.Text(
-                  'APARTADOS Y ABONOS',
-                  style: pw.TextStyle(
-                    fontSize: 10,
-                    fontWeight: pw.FontWeight.bold,
-                  ),
-                ),
-                pw.SizedBox(height: 5),
-                ...apartados.map(
-                  (item) => pw.Row(
-                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                    children: [
-                      pw.Expanded(
-                        child: pw.Text(
-                          '${item['tipo']} - ${item['cliente']}',
-                          style: pw.TextStyle(fontSize: 8),
-                        ),
-                      ),
-                      pw.Text(
-                        '\$${(item['monto'] as num).toDouble().toStringAsFixed(2)}',
-                        style: pw.TextStyle(fontSize: 8),
-                      ),
-                    ],
-                  ),
-                ), // 🚨 .toList() eliminado
-                pw.Divider(),
-              ],
-
-              if (cambios.isNotEmpty) ...[
-                pw.SizedBox(height: 5),
-                pw.Text(
-                  'CAMBIOS REALIZADOS',
-                  style: pw.TextStyle(
-                    fontSize: 10,
-                    fontWeight: pw.FontWeight.bold,
-                  ),
-                ),
-                pw.SizedBox(height: 5),
-                ...cambios.map(
-                  (item) => pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: [
-                      pw.Text(
-                        'Entró: ${item['entra']}',
-                        style: pw.TextStyle(fontSize: 8),
-                      ),
-                      pw.Text(
-                        'Salió: ${item['sale']}',
-                        style: pw.TextStyle(fontSize: 8),
-                      ),
-                      pw.Text(
-                        'Motivo: ${item['motivo']}',
-                        style: pw.TextStyle(fontSize: 7, color: PdfColors.grey),
-                      ),
-                      pw.SizedBox(height: 3),
-                    ],
-                  ),
-                ), // 🚨 .toList() eliminado
-                pw.Divider(),
-              ],
-
-              if (gastosLista.isNotEmpty) ...[
-                pw.SizedBox(height: 5),
-                pw.Text(
-                  'DETALLE DE GASTOS',
-                  style: pw.TextStyle(
-                    fontSize: 10,
-                    fontWeight: pw.FontWeight.bold,
-                  ),
-                ),
-                pw.SizedBox(height: 5),
-                ...gastosLista.map(
-                  (item) => pw.Row(
-                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: [
-                      pw.Expanded(
-                        child: pw.Text(
-                          '${item['concepto']} (${item['hora'] ?? ''})',
-                          style: pw.TextStyle(fontSize: 8),
-                        ),
-                      ),
-                      pw.Text(
-                        '-\$${(item['monto'] as num).toDouble().toStringAsFixed(2)}',
-                        style: pw.TextStyle(
-                          fontSize: 8,
-                          fontWeight: pw.FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                ), // 🚨 .toList() eliminado
-                pw.Divider(),
-              ],
-
-              pw.SizedBox(height: 5),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text(
-                    '+ VENTAS TOTALES',
-                    style: pw.TextStyle(fontSize: 10),
-                  ),
-                  pw.Text(
-                    '\$${calcVentasTotales.toStringAsFixed(2)}',
-                    style: pw.TextStyle(fontSize: 10),
-                  ),
-                ],
-              ),
-              pw.SizedBox(height: 2),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text(
-                    '  En Tarjeta',
-                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey),
-                  ),
-                  pw.Text(
-                    '\$${calcTarjeta.toStringAsFixed(2)}',
-                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey),
-                  ),
-                ],
-              ),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text(
-                    '  En Transferencia',
-                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey),
-                  ),
-                  pw.Text(
-                    '\$${calcTransferencia.toStringAsFixed(2)}',
-                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey),
-                  ),
-                ],
-              ),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text(
-                    '  En Efectivo',
-                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey),
-                  ),
-                  pw.Text(
-                    '\$${calcEfectivo.toStringAsFixed(2)}',
-                    style: pw.TextStyle(fontSize: 8, color: PdfColors.grey),
-                  ),
-                ],
-              ),
-              pw.SizedBox(height: 5),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text(
-                    '- GASTOS FISICOS',
-                    style: pw.TextStyle(fontSize: 10),
-                  ),
-                  pw.Text(
-                    '\$${widget.gastosTotales.toStringAsFixed(2)}',
-                    style: pw.TextStyle(fontSize: 10),
-                  ),
-                ],
-              ),
-              pw.Divider(),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text(
-                    'ENTREGA FÍSICA',
-                    style: pw.TextStyle(
-                      fontSize: 12,
-                      fontWeight: pw.FontWeight.bold,
-                    ),
-                  ),
-                  pw.Text(
-                    '\$${totalFisicoCaja.toStringAsFixed(2)}',
-                    style: pw.TextStyle(
-                      fontSize: 12,
-                      fontWeight: pw.FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-              pw.SizedBox(height: 15 * PdfPageFormat.mm),
-            ],
-          );
-        },
-      ),
-    );
-
-    try {
-      final Uint8List bytesPdfCorte = await doc.save();
-      final Directory? baseDir = await _obtenerDirectorioBase();
-      if (baseDir != null) {
-        final directorioCortes = Directory(
-          '${baseDir.path}/Cortes_Caja_Guardados',
-        );
-        if (!await directorioCortes.exists()) {
-          await directorioCortes.create(recursive: true);
-        }
-        final String nombreArchivo =
-            'Corte_${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}_${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}.pdf';
-        final File archivo = File('${directorioCortes.path}/$nombreArchivo');
-        await archivo.writeAsBytes(bytesPdfCorte);
-      }
-    } catch (e) {
-      debugPrint('Aviso al guardar PDF corte local: $e');
-    }
-
-    await Printing.layoutPdf(
-      onLayout: (PdfPageFormat format) async => doc.save(),
-      name: 'Corte_Caja_JPJeans',
+    // 🚨 LLAMADA AL MOTOR DE IMPRESIÓN EXTERNO
+    await MotorImpresion.imprimirCorteCaja(
+      totalPiezas: totalPiezas,
+      detalles: detalles,
+      apartados: apartados,
+      cambios: cambios,
+      gastosLista: gastosLista,
+      calcVentasTotales: calcVentasTotales,
+      calcTarjeta: calcTarjeta,
+      calcTransferencia: calcTransferencia,
+      calcEfectivo: calcEfectivo,
+      gastosTotales: widget.gastosTotales,
+      totalFisicoCaja: totalFisicoCaja,
     );
 
     if (!mounted) {
