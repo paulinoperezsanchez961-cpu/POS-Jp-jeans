@@ -16,6 +16,7 @@ class ContabilidadCortesView extends StatefulWidget {
 class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
   List<dynamic> _historialCortes = [];
   List<dynamic> _gastosFijos = [];
+  List<dynamic> _ventasWebHoy = []; // 🚨 NUEVO: Almacena ventas web diarias
   bool _cargando = true;
 
   final TextEditingController _conceptoGastoCtrl = TextEditingController();
@@ -27,18 +28,38 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
     _cargarTodo();
   }
 
+  String _formatearFechaBD(DateTime fecha) {
+    return '${fecha.year}-${fecha.month.toString().padLeft(2, '0')}-${fecha.day.toString().padLeft(2, '0')}';
+  }
+
   Future<void> _cargarTodo() async {
     setState(() {
       _cargando = true;
     });
+
     final cortes = await ApiService.obtenerHistorialCortes();
     final gastos = await ApiService.obtenerGastosFijos();
+
+    // 🚨 CARGAMOS LAS VENTAS DEL DÍA PARA FILTRAR LAS DE LA WEB
+    final hoy = DateTime.now();
+    final hoyStr = _formatearFechaBD(hoy);
+    final ventasVivas = await ApiService.obtenerVentasEnVivo(
+      fechaInicio: hoyStr,
+      fechaFin: hoyStr,
+    );
+
+    // Solo filtramos las que son ventas de E-Commerce
+    final ventasWeb = ventasVivas
+        .where((v) => v['tipo'] == 'VENTA_WEB')
+        .toList();
+
     if (!mounted) {
       return;
     }
     setState(() {
       _historialCortes = cortes;
       _gastosFijos = gastos;
+      _ventasWebHoy = ventasWeb;
       _cargando = false;
     });
   }
@@ -99,7 +120,7 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
     List items = jsonDetalles['items'] ?? [];
     List apartados = jsonDetalles['apartados'] ?? [];
     List cambios = jsonDetalles['cambios'] ?? [];
-    List gastosDetalle = jsonDetalles['gastos'] ?? []; // 🚨 EXTRAE LOS GASTOS
+    List gastosDetalle = jsonDetalles['gastos'] ?? [];
     int totalPiezas = jsonDetalles['piezas'] ?? 0;
 
     if (totalPiezas == 0 && items.isNotEmpty) {
@@ -173,7 +194,6 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
                       pw.Row(
                         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                         children: [
-                          // 🚨 NITIDEZ: Texto de método de pago en NEGRO y NEGRITAS para impresoras térmicas
                           pw.Text(
                             '${item['metodo'] ?? 'Efectivo'}',
                             style: pw.TextStyle(
@@ -276,7 +296,6 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
                 pw.Divider(borderStyle: pw.BorderStyle.dashed),
               ],
 
-              // 🚨 NUEVA SECCIÓN DE GASTOS DETALLADOS EN EL TICKET
               if (gastosDetalle.isNotEmpty) ...[
                 pw.SizedBox(height: 5),
                 pw.Text(
@@ -419,7 +438,7 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
     List items = json['items'] ?? [];
     List apartados = json['apartados'] ?? [];
     List cambios = json['cambios'] ?? [];
-    List gastosDetalle = json['gastos'] ?? []; // 🚨 UI: EXTRAE LOS GASTOS
+    List gastosDetalle = json['gastos'] ?? [];
 
     if (items.isEmpty &&
         apartados.isEmpty &&
@@ -685,11 +704,195 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
     );
   }
 
+  // 🚨 NUEVA FUNCIÓN: PESTAÑA DE VENTAS WEB
+  Widget _buildPestanaVentasWeb(bool isMobile) {
+    if (_ventasWebHoy.isEmpty) {
+      return const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.shopping_cart_outlined, size: 60, color: Colors.black12),
+            SizedBox(height: 16),
+            Text(
+              "Sin ventas en línea el día de hoy",
+              style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+      );
+    }
+
+    double totalWeb = 0;
+    double totalTarjetas = 0;
+    double totalOxxo = 0;
+
+    for (var v in _ventasWebHoy) {
+      double monto = double.tryParse(v['monto'].toString()) ?? 0;
+      totalWeb += monto;
+
+      String metodo = (v['metodo_pago'] ?? '').toLowerCase();
+      if (metodo.contains('tarjeta') ||
+          metodo.contains('stripe') ||
+          metodo.contains('paypal')) {
+        totalTarjetas += monto;
+      } else if (metodo.contains('oxxo') || metodo.contains('efectivo')) {
+        totalOxxo += monto;
+      }
+    }
+
+    return Column(
+      children: [
+        // Resumen Financiero Web
+        Container(
+          padding: const EdgeInsets.all(16),
+          color: Colors.blue.shade50,
+          child: Column(
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'INGRESOS WEB DE HOY:',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w900,
+                      color: Colors.blue,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                  Text(
+                    '\$${totalWeb.toStringAsFixed(2)}',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w900,
+                      fontSize: 20,
+                      color: Colors.blue,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: Colors.blue.shade200),
+                    ),
+                    child: Text(
+                      'Tarjetas/PayPal: \$${totalTarjetas.toStringAsFixed(2)}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.blue.shade800,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: Colors.orange.shade200),
+                    ),
+                    child: Text(
+                      'OXXO/Efectivo: \$${totalOxxo.toStringAsFixed(2)}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.orange.shade800,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const Divider(height: 1),
+        // Lista de transacciones
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.all(12),
+            itemCount: _ventasWebHoy.length,
+            itemBuilder: (context, index) {
+              final v = _ventasWebHoy[index];
+              return Card(
+                margin: const EdgeInsets.only(bottom: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  side: BorderSide(color: Colors.blue.shade100),
+                ),
+                elevation: 0,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const CircleAvatar(
+                        backgroundColor: Colors.blue,
+                        radius: 18,
+                        child: Icon(
+                          Icons.public,
+                          color: Colors.white,
+                          size: 18,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              v['descripcion'] ?? 'Compra en E-Commerce',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              '${v['hora_fmt']} • Método: ${v['metodo_pago']}',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        '+\$${v['monto']}',
+                        style: const TextStyle(
+                          color: Colors.green,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildPestanaCortes(bool isMobile) {
     return _historialCortes.isEmpty
         ? const Center(
             child: Text(
-              "Aún no se han registrado cortes de caja",
+              "Aún no se han registrado cortes de caja físicos",
               style: TextStyle(color: Colors.grey),
             ),
           )
@@ -1238,8 +1441,9 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
   Widget build(BuildContext context) {
     bool isMobile = MediaQuery.of(context).size.width < 800;
 
+    // 🚨 3 PESTAÑAS
     return DefaultTabController(
-      length: 2,
+      length: 3,
       child: Scaffold(
         backgroundColor: Colors.white,
         body: Padding(
@@ -1280,11 +1484,14 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
                 ],
               ),
               const SizedBox(height: 20),
+
+              // 🚨 TABS: AHORA INCLUYE VENTAS EN LÍNEA
               const TabBar(
                 labelColor: Colors.black,
                 indicatorColor: Colors.black,
                 tabs: [
                   Tab(text: 'HISTORIAL DE CORTES'),
+                  Tab(text: 'VENTAS EN LÍNEA (HOY)'),
                   Tab(text: 'GASTOS FIJOS SEMANALES'),
                 ],
               ),
@@ -1304,6 +1511,9 @@ class _ContabilidadCortesViewState extends State<ContabilidadCortesView> {
                       : TabBarView(
                           children: [
                             _buildPestanaCortes(isMobile),
+                            _buildPestanaVentasWeb(
+                              isMobile,
+                            ), // 🚨 LLAMADA A LA NUEVA PESTAÑA
                             _buildPestanaGastosFijos(isMobile),
                           ],
                         ),

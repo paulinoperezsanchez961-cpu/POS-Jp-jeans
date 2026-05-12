@@ -142,24 +142,39 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
           sumGastosComisiones += monto.abs();
         }
 
-        if (metodo.contains('Tarjeta')) {
+        // 🚨 DETECCIÓN INTELIGENTE DE MÉTODOS DE PAGO (Incluye Web)
+        if (metodo.contains('Tarjeta') ||
+            metodo.contains('Stripe') ||
+            metodo.toLowerCase().contains('paypal')) {
           sumTar += monto;
         } else if (metodo.contains('Transferencia')) {
           sumTrans += monto;
         } else {
-          sumEf += monto;
+          sumEf += monto; // Efectivo físico y OXXO
         }
 
-        if (tipo == 'VENTA_POS' || tipo == 'ENGANCHE_APARTADO') {
+        // 🚨 SE AÑADE LA LECTURA DE VENTAS WEB PARA LAS ESTADÍSTICAS DE PRENDAS
+        if (tipo == 'VENTA_POS' ||
+            tipo == 'ENGANCHE_APARTADO' ||
+            tipo == 'VENTA_WEB') {
           sumPiezas += cant;
 
-          String vendedor = "Mostrador";
+          String vendedor = tipo == 'VENTA_WEB'
+              ? "Tienda en Línea"
+              : "Mostrador";
+
           if (desc.contains('| Vendedor:')) {
             String despuesVendedor = desc.split('| Vendedor:')[1];
             vendedor = despuesVendedor.split('|')[0].trim();
+          } else if (desc.contains('| Creador:')) {
+            String despuesCreador = desc.split('| Creador:')[1];
+            // 🚨 SOLUCIÓN AL WARNING DE DART (Uso de interpolación en lugar de +)
+            vendedor = '${despuesCreador.split('|')[0].trim()} (Web)';
           }
+
           mapVendedores[vendedor] = (mapVendedores[vendedor] ?? 0) + cant;
 
+          // Extraer las tallas y SKU vendidos (Funciona igual para Web y POS)
           RegExp extractor = RegExp(
             r'(\d+)x\s*\[SKU:\s*(.*?)\]\s*(.*?)\s*\((?:Talla|Talla:)\s*(.*?)\)',
           );
@@ -331,12 +346,12 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
     String promptRiguroso =
         """
     Eres el Gerente Financiero de JP Jeans. Eres analítico, directo y altamente riguroso.
-    Analiza este volcado exacto de datos operativos de los últimos $_diasFiltro días y genera un INFORME EJECUTIVO PROFUNDO (máximo 4 párrafos, usa viñetas). 
-    Debes mencionar el flujo de dinero (Efectivo vs Tarjeta vs Transferencia), la eficiencia del stock, horas pico y recomendaciones de reabastecimiento en base a las tallas.
+    Analiza este volcado exacto de datos operativos de los últimos $_diasFiltro días (incluye ventas web y físicas) y genera un INFORME EJECUTIVO PROFUNDO (máximo 4 párrafos, usa viñetas). 
+    Debes mencionar el flujo de dinero (Efectivo vs Tarjetas/Web vs Transferencia), la eficiencia del stock, el rendimiento de la web, horas pico y recomendaciones de reabastecimiento en base a las tallas.
 
     *** DATOS FINANCIEROS ***
-    - Ingresos Brutos: \$${_ingresosReales.toStringAsFixed(2)}
-    - Desglose -> Efectivo: \$${_totalEfectivo.toStringAsFixed(2)} | Tarjeta (MP): \$${_totalTarjeta.toStringAsFixed(2)} | Transferencias: \$${_totalTransferencia.toStringAsFixed(2)}
+    - Ingresos Brutos Totales: \$${_ingresosReales.toStringAsFixed(2)}
+    - Desglose -> Efectivo (Local+OXXO): \$${_totalEfectivo.toStringAsFixed(2)} | Tarjeta / Web: \$${_totalTarjeta.toStringAsFixed(2)} | Transferencias: \$${_totalTransferencia.toStringAsFixed(2)}
     - Gastos de Operación: \$${(_gastosReales + _gastosFijosCalculados).toStringAsFixed(2)}
     - UTILIDAD NETA: \$${neto.toStringAsFixed(2)}
 
@@ -349,7 +364,7 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
     - Hora Pico de Flujo: $_mejorHora
 
     *** RENDIMIENTO ESPECÍFICO ***
-    - Ventas por Vendedor: $strVendedores
+    - Ventas por Vendedor/Línea: $strVendedores
     - Tallas más vendidas: $strTallas
     - Top 5 Productos Estrella: $strTopProductos
     """;
@@ -598,7 +613,7 @@ class _DashboardEstadisticasViewState extends State<DashboardEstadisticasView> {
                       Icons.money,
                     ),
                     _buildMetricCard(
-                      'TARJETA (MP)',
+                      'TARJETAS / WEB', // 🚨 ACTUALIZADO PARA ABARCAR PAGOS DIGITALES
                       '\$${_totalTarjeta.toStringAsFixed(2)}',
                       Colors.blue.shade700,
                       Colors.white,

@@ -88,11 +88,12 @@ class _VentasEnVivoViewState extends State<VentasEnVivoView> {
       }
 
       // Los totales por método de pago SÍ deben sumar/restar para decirnos cuánto hay físicamente
-      if (metodo.contains('Tarjeta')) {
+      if (metodo.contains('Tarjeta') || metodo.contains('Stripe')) {
         totalTarjeta += monto;
       } else if (metodo.contains('Transferencia')) {
         totalTransferencia += monto;
       } else {
+        // Todo lo demás (Efectivo local, OXXO Efectivo, PayPal) cae en la sumatoria general de líquido
         totalEfectivo += monto;
       }
     }
@@ -172,14 +173,14 @@ class _VentasEnVivoViewState extends State<VentasEnVivoView> {
                     Icons.account_balance_wallet,
                   ),
                   _buildKpiCard(
-                    'EFECTIVO',
+                    'EFECTIVO / OTROS',
                     totalEfectivo,
                     Colors.green.shade700,
                     Colors.green.shade50,
                     Icons.payments,
                   ),
                   _buildKpiCard(
-                    'TARJETA MP',
+                    'TARJETA',
                     totalTarjeta,
                     Colors.blue.shade700,
                     Colors.blue.shade50,
@@ -238,7 +239,6 @@ class _VentasEnVivoViewState extends State<VentasEnVivoView> {
                         itemBuilder: (context, index) {
                           final v = _ventasVisibles[index];
                           final String tipo = v['tipo'] ?? '';
-                          // 🚨 AQUÍ EL SISTEMA EXTRAE LA DESCRIPCIÓN/MOTIVO DE LA BD
                           final String desc =
                               v['descripcion'] ?? 'Sin detalles';
                           final double monto =
@@ -259,7 +259,7 @@ class _VentasEnVivoViewState extends State<VentasEnVivoView> {
                             }
                           }
 
-                          // Colores por tipo de movimiento
+                          // 🚨 AQUÍ EL RADAR DETECTA EL TIPO Y LE DA COLOR
                           Color colorIcono = Colors.grey;
                           IconData icono = Icons.info;
                           Color bgIcono = Colors.grey.shade100;
@@ -268,6 +268,11 @@ class _VentasEnVivoViewState extends State<VentasEnVivoView> {
                             colorIcono = Colors.green.shade600;
                             bgIcono = Colors.green.shade50;
                             icono = Icons.point_of_sale;
+                          } else if (tipo == 'VENTA_WEB') {
+                            // 🌐 NUEVO: VENTA EN LÍNEA
+                            colorIcono = Colors.blue.shade600;
+                            bgIcono = Colors.blue.shade50;
+                            icono = Icons.shopping_cart;
                           } else if (tipo == 'LIQUIDACION_APARTADO') {
                             colorIcono = Colors.red.shade600;
                             bgIcono = Colors.red.shade50;
@@ -290,9 +295,17 @@ class _VentasEnVivoViewState extends State<VentasEnVivoView> {
                             icono = Icons.money_off;
                           }
 
-                          // Badges (Etiquetas) para Método de Pago
-                          bool esTarjeta = metodoPago.contains('Tarjeta');
+                          // 🚨 BADGES INTELIGENTES PARA MÉTODOS DE PAGO WEB Y FÍSICOS
+                          bool esTarjeta =
+                              metodoPago.contains('Tarjeta') ||
+                              metodoPago.contains('Stripe');
                           bool esTransf = metodoPago.contains('Transferencia');
+                          bool esPaypal = metodoPago.toLowerCase().contains(
+                            'paypal',
+                          );
+                          bool esOxxo = metodoPago.toUpperCase().contains(
+                            'OXXO',
+                          );
 
                           Color colorMetodo = Colors.green.shade700;
                           IconData iconMetodo = Icons.money;
@@ -303,6 +316,12 @@ class _VentasEnVivoViewState extends State<VentasEnVivoView> {
                           } else if (esTransf) {
                             colorMetodo = Colors.purple.shade700;
                             iconMetodo = Icons.compare_arrows;
+                          } else if (esPaypal) {
+                            colorMetodo = Colors.indigo.shade600;
+                            iconMetodo = Icons.language;
+                          } else if (esOxxo) {
+                            colorMetodo = Colors.orange.shade700;
+                            iconMetodo = Icons.storefront;
                           }
 
                           // 🎨 TARJETA DE MOVIMIENTO
@@ -342,7 +361,6 @@ class _VentasEnVivoViewState extends State<VentasEnVivoView> {
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
                                     children: [
-                                      // 🚨 PARCHE RESPONSIVO: Expanded envuelve el título para evitar el overflow
                                       Row(
                                         mainAxisAlignment:
                                             MainAxisAlignment.spaceBetween,
@@ -372,7 +390,6 @@ class _VentasEnVivoViewState extends State<VentasEnVivoView> {
                                         ],
                                       ),
                                       const SizedBox(height: 6),
-                                      // 🚨 AQUÍ SE IMPRIME EL MOTIVO/DESCRIPCIÓN DEL GASTO O LA VENTA
                                       Text(
                                         desc,
                                         style: const TextStyle(
@@ -382,7 +399,6 @@ class _VentasEnVivoViewState extends State<VentasEnVivoView> {
                                         ),
                                       ),
                                       const SizedBox(height: 10),
-                                      // 🚨 PARCHE RESPONSIVO: Protegemos el método de pago en pantallas mini
                                       Row(
                                         children: [
                                           Icon(
@@ -474,7 +490,7 @@ class _VentasEnVivoViewState extends State<VentasEnVivoView> {
     );
   }
 
-  // 🎨 BOTONES DE HEADER (Optimizados)
+  // 🎨 BOTONES DE HEADER
   Widget _buildFiltrosYRefresh() {
     return Row(
       mainAxisSize: MainAxisSize.min,
