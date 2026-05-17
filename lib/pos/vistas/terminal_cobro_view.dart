@@ -83,6 +83,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     super.dispose();
   }
 
+  // 🚨 PROCESAMIENTO VIP MEJORADO (Muestra error exacto si falla)
   Future<void> _procesarQRVip(String qrHash) async {
     if (!mounted) {
       return;
@@ -104,17 +105,19 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
       if (!mounted) {
         return;
       }
-      nav.pop();
+      nav.pop(); // Cierra el loader
 
       if (res['exito'] == true) {
         _mostrarOpcionesVIP(res['cliente'], qrHash);
       } else {
+        // 🚨 SI LA BD LO RECHAZA, MOSTRAMOS UN ERROR GENERAL
         sm.showSnackBar(
-          SnackBar(
+          const SnackBar(
             content: Text(
-              res['error'] ?? 'Tarjeta VIP no encontrada o inválida',
+              'Código no reconocido: No es un producto ni un cliente VIP válido.',
             ),
             backgroundColor: Colors.red,
+            duration: Duration(seconds: 4),
           ),
         );
       }
@@ -501,6 +504,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     });
   }
 
+  // 🚨 DETECCIÓN UNIVERSAL BLINDADA (El código que lo arregla todo)
   void _agregarAlCarrito(String codigoOBusqueda) {
     if (codigoOBusqueda.isEmpty) {
       if (mounted) {
@@ -509,13 +513,17 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
       return;
     }
 
-    if (RegExp(r'^[123]\d{7,}$').hasMatch(codigoOBusqueda) ||
-        RegExp(r'^[123]-').hasMatch(codigoOBusqueda)) {
-      _procesarQRVip(codigoOBusqueda);
-      return;
+    String codigoLimpio = codigoOBusqueda.trim();
+
+    // 🚨 LIMPIADOR UNIVERSAL DE CÓDIGOS QR DIGITALES
+    // Si el QR de la tarjeta VIP es un enlace web (ej: https://api.jpjeans.com/vip/abcd123)
+    // Extraemos de forma inteligente solo el último fragmento para que la BD lo entienda.
+    if (codigoLimpio.startsWith('http')) {
+      codigoLimpio = codigoLimpio.split('/').last;
     }
 
-    final datosEscaneo = decodificarEscaneo(codigoOBusqueda);
+    // === 1. LÓGICA DE BÚSQUEDA DE PRODUCTOS PRIMERO ===
+    final datosEscaneo = decodificarEscaneo(codigoLimpio);
     String skuLimpio = datosEscaneo['sku']!;
     String tallaLimpia = datosEscaneo['talla']!;
 
@@ -526,6 +534,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     }).toList();
 
     if (producto.isNotEmpty) {
+      // 🟢 ES UN PRODUCTO FÍSICO
       var p = producto.first;
       List<Map<String, dynamic>> tallasBD = parsearTallasBD(p['tallas']);
       if (tallaLimpia == 'UNICA' &&
@@ -536,19 +545,8 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
       }
       _ejecutarAgregarAlCarrito(p, tallaLimpia, tallasBD);
     } else {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Prenda no encontrada'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      _buscadorController.clear();
-      if (mounted) {
-        _buscadorFocus.requestFocus();
-      }
+      // 🟡 NO ES ROPA: LO MANDAMOS DIRECTO AL SERVIDOR PARA QUE VERIFIQUE SI ES TARJETA VIP
+      _procesarQRVip(codigoLimpio);
     }
   }
 

@@ -12,8 +12,9 @@ class ApiService {
   // ESTA FUNCIÓN SE USA EN LA TERMINAL DE COBRO (Para cobrar con saldo VIP)
   static Future<Map<String, dynamic>> consultarVIP(String qrHash) async {
     try {
+      // 🚨 PROTECCIÓN: Uri.encodeComponent evita que símbolos raros rompan la app
       final res = await http.get(
-        Uri.parse('$baseUrl/pos/vip/consultar/$qrHash'),
+        Uri.parse('$baseUrl/pos/vip/consultar/${Uri.encodeComponent(qrHash)}'),
       );
       if (res.statusCode == 200) {
         return jsonDecode(res.body);
@@ -28,7 +29,7 @@ class ApiService {
   static Future<Map<String, dynamic>> consultarQRVIP(String qr) async {
     try {
       final response = await http.get(
-        Uri.parse('$baseUrl/pos/vip/consultar/$qr'),
+        Uri.parse('$baseUrl/pos/vip/consultar/${Uri.encodeComponent(qr)}'),
       );
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
@@ -43,7 +44,7 @@ class ApiService {
     }
   }
 
-  // 2. Registrar cliente vinculado a un QR físico (AHORA RECIBE 4 PARÁMETROS)
+  // 2. Registrar cliente vinculado a un QR físico
   static Future<Map<String, dynamic>> registrarVIP(
     String nombre,
     String email,
@@ -67,7 +68,7 @@ class ApiService {
     }
   }
 
-  // 3. Traspasar historial de una tarjeta vieja a una nueva (Ascenso Oro/Titanio)
+  // 3. Traspasar historial de una tarjeta vieja a una nueva
   static Future<Map<String, dynamic>> traspasarVIP(
     String viejoQr,
     String nuevoQr,
@@ -92,7 +93,7 @@ class ApiService {
   static Future<Map<String, dynamic>> sortearVIP(String nivel) async {
     try {
       final res = await http.get(
-        Uri.parse('$baseUrl/oficina/vip/sorteo/$nivel'),
+        Uri.parse('$baseUrl/oficina/vip/sorteo/${Uri.encodeComponent(nivel)}'),
       );
       return jsonDecode(res.body);
     } catch (e) {
@@ -208,7 +209,7 @@ class ApiService {
   }
 
   // ==========================================================
-  // 💼 CONTABILIDAD Y CORTES (ACTUALIZADO TRANSFERENCIA)
+  // 💼 CONTABILIDAD Y CORTES
   // ==========================================================
   static Future<bool> guardarCorteCaja(
     String cajero,
@@ -257,7 +258,8 @@ class ApiService {
     try {
       String urlStr = '$baseUrl/oficina/ventas-en-vivo';
       if (fechaInicio != null && fechaFin != null) {
-        urlStr += '?fechaInicio=$fechaInicio&fechaFin=$fechaFin';
+        urlStr +=
+            '?fechaInicio=${Uri.encodeComponent(fechaInicio)}&fechaFin=${Uri.encodeComponent(fechaFin)}';
       }
       final res = await http.get(Uri.parse(urlStr));
       if (res.statusCode == 200) {
@@ -489,7 +491,10 @@ class ApiService {
 
   static Future<Map<String, dynamic>> validarCupon(String codigo) async {
     try {
-      final res = await http.get(Uri.parse('$baseUrl/cupones/validar/$codigo'));
+      // 🚨 PROTECCIÓN: Uri.encodeComponent aplicado
+      final res = await http.get(
+        Uri.parse('$baseUrl/cupones/validar/${Uri.encodeComponent(codigo)}'),
+      );
       if (res.statusCode == 200) {
         return jsonDecode(res.body);
       }

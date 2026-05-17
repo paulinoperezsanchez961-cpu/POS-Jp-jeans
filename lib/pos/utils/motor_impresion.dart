@@ -48,38 +48,40 @@ class MotorImpresion {
         pageFormat: const PdfPageFormat(
           80 * PdfPageFormat.mm,
           double.infinity,
-          marginAll: 2 * PdfPageFormat.mm, // Márgenes mínimos
+          marginAll:
+              5 *
+              PdfPageFormat.mm, // 🚨 MARGEN AMPLIADO (Evita cortes a los lados)
         ),
         build: (pw.Context pdfCtx) {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.center,
             mainAxisSize: pw.MainAxisSize.min,
             children: [
-              // 🚨 LOGO MUCHO MÁS GRANDE COMO PROTAGONISTA
-              if (imageLogo != null) pw.Image(imageLogo, width: 65, height: 65),
+              // 🚨 LOGO MÁS GRANDE COMO PROTAGONISTA
+              if (imageLogo != null) pw.Image(imageLogo, width: 75, height: 75),
               pw.SizedBox(height: 8),
 
-              // 🚨 TEXTOS DE SUCURSAL MÁS PEQUEÑOS Y NUEVA UBICACIÓN
+              // 🚨 TEXTOS MÁS PEQUEÑOS Y ESTILIZADOS
               pw.Text(
                 'JP JEANS',
                 style: pw.TextStyle(
-                  fontSize: 14,
+                  fontSize: 12,
                   fontWeight: pw.FontWeight.bold,
                 ),
               ),
-              pw.Text('TLAXCALA', style: pw.TextStyle(fontSize: 10)),
+              pw.Text('TLAXCALA', style: pw.TextStyle(fontSize: 8)),
               pw.SizedBox(height: 2),
               pw.Text(
                 'Central de autobuses, Tlax',
-                style: pw.TextStyle(fontSize: 8),
+                style: pw.TextStyle(fontSize: 7),
               ),
 
               pw.SizedBox(height: 6),
-              pw.Text(fechaHora, style: pw.TextStyle(fontSize: 9)),
+              pw.Text(fechaHora, style: pw.TextStyle(fontSize: 8)),
               pw.Text(
                 'Método: ${metodoDB == "MIXTO" ? "PAGO MIXTO" : metodoDB}',
                 style: pw.TextStyle(
-                  fontSize: 9,
+                  fontSize: 8,
                   fontWeight: pw.FontWeight.bold,
                 ),
               ),
@@ -88,12 +90,10 @@ class MotorImpresion {
               pw.Divider(borderStyle: pw.BorderStyle.dashed),
               pw.SizedBox(height: 4),
 
-              // 🚨 RESUMEN DE COMPRA MÁS ORDENADO Y ESPACIADO
+              // RESUMEN DE COMPRA
               ...carritoAEnviar.map((item) {
                 return pw.Padding(
-                  padding: const pw.EdgeInsets.only(
-                    bottom: 4,
-                  ), // Espaciado estético entre productos
+                  padding: const pw.EdgeInsets.only(bottom: 4),
                   child: pw.Row(
                     mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                     crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -101,14 +101,14 @@ class MotorImpresion {
                       pw.Expanded(
                         child: pw.Text(
                           '${item['cantidad']}x ${item['nombre']} [Talla: ${item['talla']}]',
-                          style: pw.TextStyle(fontSize: 9),
+                          style: pw.TextStyle(fontSize: 8),
                         ),
                       ),
                       pw.SizedBox(width: 4),
                       pw.Text(
                         '\$${(item['precio'] * item['cantidad']).toStringAsFixed(2)}',
                         style: pw.TextStyle(
-                          fontSize: 9,
+                          fontSize: 8,
                           fontWeight: pw.FontWeight.bold,
                         ),
                       ),
@@ -122,14 +122,14 @@ class MotorImpresion {
               pw.SizedBox(height: 4),
 
               if (descuentoTxt.isNotEmpty) ...[
-                pw.Text(descuentoTxt, style: pw.TextStyle(fontSize: 9)),
+                pw.Text(descuentoTxt, style: pw.TextStyle(fontSize: 8)),
                 pw.SizedBox(height: 5),
               ],
               if (vipTxt.isNotEmpty) ...[
                 pw.Text(
                   vipTxt,
                   style: pw.TextStyle(
-                    fontSize: 9,
+                    fontSize: 8,
                     fontWeight: pw.FontWeight.bold,
                   ),
                 ),
@@ -142,14 +142,14 @@ class MotorImpresion {
                   pw.Text(
                     'TOTAL',
                     style: pw.TextStyle(
-                      fontSize: 14,
+                      fontSize: 12,
                       fontWeight: pw.FontWeight.bold,
                     ),
                   ),
                   pw.Text(
                     '\$${totalImpresion.toStringAsFixed(2)}',
                     style: pw.TextStyle(
-                      fontSize: 14,
+                      fontSize: 12,
                       fontWeight: pw.FontWeight.bold,
                     ),
                   ),
@@ -161,20 +161,20 @@ class MotorImpresion {
                 pw.Row(
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
-                    pw.Text('EFECTIVO', style: pw.TextStyle(fontSize: 9)),
+                    pw.Text('EFECTIVO', style: pw.TextStyle(fontSize: 8)),
                     pw.Text(
                       '\$${pagoEf.toStringAsFixed(2)}',
-                      style: pw.TextStyle(fontSize: 9),
+                      style: pw.TextStyle(fontSize: 8),
                     ),
                   ],
                 ),
                 pw.Row(
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
-                    pw.Text('CAMBIO', style: pw.TextStyle(fontSize: 9)),
+                    pw.Text('CAMBIO', style: pw.TextStyle(fontSize: 8)),
                     pw.Text(
                       '\$${cambioImpresion.toStringAsFixed(2)}',
-                      style: pw.TextStyle(fontSize: 9),
+                      style: pw.TextStyle(fontSize: 8),
                     ),
                   ],
                 ),
@@ -182,10 +182,10 @@ class MotorImpresion {
                 pw.Row(
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
-                    pw.Text('TRANSFERENCIA', style: pw.TextStyle(fontSize: 9)),
+                    pw.Text('TRANSFERENCIA', style: pw.TextStyle(fontSize: 8)),
                     pw.Text(
                       '\$${pagoTr.toStringAsFixed(2)}',
-                      style: pw.TextStyle(fontSize: 9),
+                      style: pw.TextStyle(fontSize: 8),
                     ),
                   ],
                 ),
@@ -194,11 +194,11 @@ class MotorImpresion {
                   children: [
                     pw.Text(
                       'EFECTIVO RECIBIDO',
-                      style: pw.TextStyle(fontSize: 9),
+                      style: pw.TextStyle(fontSize: 8),
                     ),
                     pw.Text(
                       '\$${pagoEf.toStringAsFixed(2)}',
-                      style: pw.TextStyle(fontSize: 9),
+                      style: pw.TextStyle(fontSize: 8),
                     ),
                   ],
                 ),
@@ -208,14 +208,14 @@ class MotorImpresion {
                     pw.Text(
                       'CAMBIO EN EFECTIVO',
                       style: pw.TextStyle(
-                        fontSize: 9,
+                        fontSize: 8,
                         fontWeight: pw.FontWeight.bold,
                       ),
                     ),
                     pw.Text(
                       '\$${cambioImpresion.toStringAsFixed(2)}',
                       style: pw.TextStyle(
-                        fontSize: 9,
+                        fontSize: 8,
                         fontWeight: pw.FontWeight.bold,
                       ),
                     ),
@@ -225,16 +225,16 @@ class MotorImpresion {
                 pw.Row(
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
-                    pw.Text('PAGO APROBADO', style: pw.TextStyle(fontSize: 9)),
-                    pw.Text('TRANSFERENCIA', style: pw.TextStyle(fontSize: 9)),
+                    pw.Text('PAGO APROBADO', style: pw.TextStyle(fontSize: 8)),
+                    pw.Text('TRANSFERENCIA', style: pw.TextStyle(fontSize: 8)),
                   ],
                 ),
               ] else ...[
                 pw.Row(
                   mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                   children: [
-                    pw.Text('PAGO APROBADO', style: pw.TextStyle(fontSize: 9)),
-                    pw.Text('TARJETA', style: pw.TextStyle(fontSize: 9)),
+                    pw.Text('PAGO APROBADO', style: pw.TextStyle(fontSize: 8)),
+                    pw.Text('TARJETA', style: pw.TextStyle(fontSize: 8)),
                   ],
                 ),
               ],
@@ -246,19 +246,19 @@ class MotorImpresion {
               pw.Text(
                 '¡GRACIAS POR SU COMPRA!',
                 style: pw.TextStyle(
-                  fontSize: 11,
+                  fontSize: 10,
                   fontWeight: pw.FontWeight.bold,
                 ),
               ),
 
               pw.SizedBox(height: 8),
 
-              // 🚨 NUEVO TEXTO INSPIRADOR TIPO DEPARTAMENTAL
               pw.Text(
                 'Muchas gracias por consumir producto nacional, así apoyas a la economía local y al crecimiento del estado. Nuestra meta como empresa es poder proporcionar productos de la más alta calidad a un precio justo y llevar la moda al estado del cual nacimos. Somos una empresa 100% Tlaxcalteca y es un honor estar presentes ya en el estado. Gracias por confiar en nosotros, un saludo de parte de Paulino Pérez y bonito día.',
                 textAlign: pw.TextAlign.center,
                 style: pw.TextStyle(
-                  fontSize: 7, // Letras pequeñas
+                  fontSize:
+                      6, // 🚨 Letra más pequeña para que encaje como bloque
                   color: PdfColors.black,
                   lineSpacing: 1.5,
                 ),
@@ -333,25 +333,25 @@ class MotorImpresion {
         pageFormat: const PdfPageFormat(
           80 * PdfPageFormat.mm,
           double.infinity,
-          marginAll: 2 * PdfPageFormat.mm,
+          marginAll: 5 * PdfPageFormat.mm, // 🚨 MARGEN AMPLIADO
         ),
         build: (pw.Context pdfCtx) {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.center,
             mainAxisSize: pw.MainAxisSize.min,
             children: [
-              if (imageLogo != null) pw.Image(imageLogo, width: 45, height: 45),
+              if (imageLogo != null) pw.Image(imageLogo, width: 55, height: 55),
               pw.SizedBox(height: 5),
               pw.Text(
                 'CORTE DE CAJA',
                 style: pw.TextStyle(
-                  fontSize: 14,
+                  fontSize: 12,
                   fontWeight: pw.FontWeight.bold,
                 ),
               ),
-              pw.Text('JP JEANS TLAXCALA', style: pw.TextStyle(fontSize: 10)),
+              pw.Text('JP JEANS TLAXCALA', style: pw.TextStyle(fontSize: 8)),
               pw.SizedBox(height: 5),
-              pw.Text(fechaHora, style: pw.TextStyle(fontSize: 9)),
+              pw.Text(fechaHora, style: pw.TextStyle(fontSize: 8)),
               pw.Divider(),
 
               if (detalles.isNotEmpty) ...[
@@ -359,7 +359,7 @@ class MotorImpresion {
                 pw.Text(
                   'VENTAS DEL DÍA ($totalPiezas PZS)',
                   style: pw.TextStyle(
-                    fontSize: 10,
+                    fontSize: 9,
                     fontWeight: pw.FontWeight.bold,
                   ),
                 ),
@@ -376,7 +376,7 @@ class MotorImpresion {
                     children: [
                       pw.Text(
                         itemsVendidos.replaceAll('c/u.', 'c/u\n'),
-                        style: pw.TextStyle(fontSize: 9),
+                        style: pw.TextStyle(fontSize: 8),
                       ),
                       pw.Row(
                         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
@@ -385,13 +385,13 @@ class MotorImpresion {
                           pw.Text(
                             '${item['metodo'] ?? 'Efectivo'}',
                             style: pw.TextStyle(
-                              fontSize: 9,
+                              fontSize: 8,
                               fontWeight: pw.FontWeight.bold,
                             ),
                           ),
                           pw.Text(
                             vendedor != '' ? 'Vend: $vendedor' : '',
-                            style: pw.TextStyle(fontSize: 9),
+                            style: pw.TextStyle(fontSize: 8),
                           ),
                         ],
                       ),
@@ -401,7 +401,7 @@ class MotorImpresion {
                           pw.Text(
                             '\$${(item['precio'] as num).toDouble().toStringAsFixed(2)}',
                             style: pw.TextStyle(
-                              fontSize: 10,
+                              fontSize: 9,
                               fontWeight: pw.FontWeight.bold,
                             ),
                           ),
@@ -419,7 +419,7 @@ class MotorImpresion {
                 pw.Text(
                   'APARTADOS Y ABONOS',
                   style: pw.TextStyle(
-                    fontSize: 10,
+                    fontSize: 9,
                     fontWeight: pw.FontWeight.bold,
                   ),
                 ),
@@ -432,13 +432,13 @@ class MotorImpresion {
                       pw.Expanded(
                         child: pw.Text(
                           '${item['tipo']} - ${item['cliente']}',
-                          style: pw.TextStyle(fontSize: 9),
+                          style: pw.TextStyle(fontSize: 8),
                         ),
                       ),
                       pw.SizedBox(width: 4),
                       pw.Text(
                         '\$${(item['monto'] as num).toDouble().toStringAsFixed(2)}',
-                        style: pw.TextStyle(fontSize: 9),
+                        style: pw.TextStyle(fontSize: 8),
                       ),
                     ],
                   ),
@@ -451,7 +451,7 @@ class MotorImpresion {
                 pw.Text(
                   'CAMBIOS REALIZADOS',
                   style: pw.TextStyle(
-                    fontSize: 10,
+                    fontSize: 9,
                     fontWeight: pw.FontWeight.bold,
                   ),
                 ),
@@ -462,15 +462,15 @@ class MotorImpresion {
                     children: [
                       pw.Text(
                         'Entró: ${item['entra']}',
-                        style: pw.TextStyle(fontSize: 9),
+                        style: pw.TextStyle(fontSize: 8),
                       ),
                       pw.Text(
                         'Salió: ${item['sale']}',
-                        style: pw.TextStyle(fontSize: 9),
+                        style: pw.TextStyle(fontSize: 8),
                       ),
                       pw.Text(
                         'Motivo: ${item['motivo']}',
-                        style: pw.TextStyle(fontSize: 8),
+                        style: pw.TextStyle(fontSize: 7),
                       ),
                       pw.SizedBox(height: 3),
                     ],
@@ -484,7 +484,7 @@ class MotorImpresion {
                 pw.Text(
                   'DETALLE DE GASTOS',
                   style: pw.TextStyle(
-                    fontSize: 10,
+                    fontSize: 9,
                     fontWeight: pw.FontWeight.bold,
                   ),
                 ),
@@ -497,14 +497,14 @@ class MotorImpresion {
                       pw.Expanded(
                         child: pw.Text(
                           '${item['concepto']} (${item['hora'] ?? ''})',
-                          style: pw.TextStyle(fontSize: 9),
+                          style: pw.TextStyle(fontSize: 8),
                         ),
                       ),
                       pw.SizedBox(width: 4),
                       pw.Text(
                         '-\$${(item['monto'] as num).toDouble().toStringAsFixed(2)}',
                         style: pw.TextStyle(
-                          fontSize: 9,
+                          fontSize: 8,
                           fontWeight: pw.FontWeight.bold,
                         ),
                       ),
@@ -518,7 +518,7 @@ class MotorImpresion {
               pw.Text(
                 'RESUMEN DE CAJA',
                 style: pw.TextStyle(
-                  fontSize: 12,
+                  fontSize: 11,
                   fontWeight: pw.FontWeight.bold,
                 ),
               ),
@@ -527,11 +527,11 @@ class MotorImpresion {
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
-                  pw.Text('PIEZAS VENDIDAS', style: pw.TextStyle(fontSize: 10)),
+                  pw.Text('PIEZAS VENDIDAS', style: pw.TextStyle(fontSize: 8)),
                   pw.Text(
                     '$totalPiezas PZS',
                     style: pw.TextStyle(
-                      fontSize: 10,
+                      fontSize: 8,
                       fontWeight: pw.FontWeight.bold,
                     ),
                   ),
@@ -542,13 +542,10 @@ class MotorImpresion {
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
-                  pw.Text(
-                    'TOTAL EN TARJETA',
-                    style: pw.TextStyle(fontSize: 10),
-                  ),
+                  pw.Text('TOTAL EN TARJETA', style: pw.TextStyle(fontSize: 8)),
                   pw.Text(
                     '\$${calcTarjeta.toStringAsFixed(2)}',
-                    style: pw.TextStyle(fontSize: 10),
+                    style: pw.TextStyle(fontSize: 8),
                   ),
                 ],
               ),
@@ -558,11 +555,11 @@ class MotorImpresion {
                 children: [
                   pw.Text(
                     'TOTAL TRANSFERENCIA',
-                    style: pw.TextStyle(fontSize: 10),
+                    style: pw.TextStyle(fontSize: 8),
                   ),
                   pw.Text(
                     '\$${calcTransferencia.toStringAsFixed(2)}',
-                    style: pw.TextStyle(fontSize: 10),
+                    style: pw.TextStyle(fontSize: 8),
                   ),
                 ],
               ),
@@ -573,24 +570,21 @@ class MotorImpresion {
                 children: [
                   pw.Text(
                     'TOTAL EN EFECTIVO',
-                    style: pw.TextStyle(fontSize: 10),
+                    style: pw.TextStyle(fontSize: 8),
                   ),
                   pw.Text(
                     '\$${calcEfectivo.toStringAsFixed(2)}',
-                    style: pw.TextStyle(fontSize: 10),
+                    style: pw.TextStyle(fontSize: 8),
                   ),
                 ],
               ),
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
-                  pw.Text(
-                    '- GASTOS DEL DÍA',
-                    style: pw.TextStyle(fontSize: 10),
-                  ),
+                  pw.Text('- GASTOS DEL DÍA', style: pw.TextStyle(fontSize: 8)),
                   pw.Text(
                     '-\$${gastosTotales.toStringAsFixed(2)}',
-                    style: pw.TextStyle(fontSize: 10),
+                    style: pw.TextStyle(fontSize: 8),
                   ),
                 ],
               ),
@@ -602,14 +596,14 @@ class MotorImpresion {
                   pw.Text(
                     'EFECTIVO A ENTREGAR',
                     style: pw.TextStyle(
-                      fontSize: 12,
+                      fontSize: 11,
                       fontWeight: pw.FontWeight.bold,
                     ),
                   ),
                   pw.Text(
                     '\$${totalFisicoCaja.toStringAsFixed(2)}',
                     style: pw.TextStyle(
-                      fontSize: 12,
+                      fontSize: 11,
                       fontWeight: pw.FontWeight.bold,
                     ),
                   ),
@@ -623,14 +617,14 @@ class MotorImpresion {
                   pw.Text(
                     'TOTAL DE DINERO',
                     style: pw.TextStyle(
-                      fontSize: 12,
+                      fontSize: 11,
                       fontWeight: pw.FontWeight.bold,
                     ),
                   ),
                   pw.Text(
                     '\$${calcVentasTotales.toStringAsFixed(2)}',
                     style: pw.TextStyle(
-                      fontSize: 12,
+                      fontSize: 11,
                       fontWeight: pw.FontWeight.bold,
                     ),
                   ),
