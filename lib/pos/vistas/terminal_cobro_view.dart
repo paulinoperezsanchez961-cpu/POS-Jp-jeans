@@ -83,13 +83,123 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     super.dispose();
   }
 
-  // 🚨 PROCESAMIENTO VIP MEJORADO (Muestra error exacto si falla)
-  Future<void> _procesarQRVip(String qrHash) async {
+  // =========================================================================
+  // 🚨 INTERCEPTOR VIP (Se activa justo antes de elegir cómo pagar)
+  // =========================================================================
+  void _preguntarVIPAntesDeCobrar(VoidCallback onContinuar) {
+    if (_clienteVIP != null) {
+      onContinuar();
+      return;
+    }
+
+    final TextEditingController vipPistolaController = TextEditingController();
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: Colors.amber, width: 2),
+        ),
+        title: const Row(
+          children: [
+            Icon(Icons.stars, color: Colors.amber, size: 30),
+            SizedBox(width: 10),
+            Text(
+              '¿TIENE TARJETA VIP?',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              '¿El cliente desea acumular o gastar su CashBack en esta compra?',
+              style: TextStyle(fontSize: 16),
+            ),
+            const SizedBox(height: 15),
+            TextField(
+              controller: vipPistolaController,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Escanear con pistola aquí...',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.qr_code_scanner),
+              ),
+              onSubmitted: (val) {
+                Navigator.pop(ctx);
+                _procesarQRVip(val, onContinuar);
+              },
+            ),
+          ],
+        ),
+        actionsAlignment: MainAxisAlignment.center,
+        actions: [
+          OutlinedButton(
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              foregroundColor: Colors.black,
+            ),
+            onPressed: () {
+              Navigator.pop(ctx);
+              onContinuar();
+            },
+            child: const Text(
+              'NO TIENE',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+          const SizedBox(width: 10),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.black,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+            ),
+            icon: const Icon(Icons.camera_alt),
+            label: const Text(
+              'USAR CÁMARA',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await _escanearVIPCamara(onContinuar);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _escanearVIPCamara(VoidCallback onContinuar) async {
+    try {
+      var result = await BarcodeScanner.scan();
+      if (result.type == ResultType.Barcode && result.rawContent.isNotEmpty) {
+        String codigoLimpio = result.rawContent.trim();
+        if (codigoLimpio.startsWith('http')) {
+          codigoLimpio = codigoLimpio.split('/').last;
+        }
+        await _procesarQRVip(codigoLimpio, onContinuar);
+      } else {
+        onContinuar();
+      }
+    } catch (e) {
+      onContinuar();
+    }
+  }
+
+  Future<void> _procesarQRVip(String qrHash, VoidCallback onContinuar) async {
     if (!mounted) {
       return;
     }
 
-    _buscadorController.clear();
+    String hashLimpio = qrHash.trim();
+    if (hashLimpio.startsWith('http')) {
+      hashLimpio = hashLimpio.split('/').last;
+    }
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -101,25 +211,23 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     final sm = ScaffoldMessenger.of(context);
 
     try {
-      var res = await ApiService.consultarVIP(qrHash);
+      var res = await ApiService.consultarVIP(hashLimpio);
       if (!mounted) {
         return;
       }
-      nav.pop(); // Cierra el loader
+      nav.pop();
 
       if (res['exito'] == true) {
-        _mostrarOpcionesVIP(res['cliente'], qrHash);
+        _mostrarOpcionesVIP(res['cliente'], hashLimpio, onContinuar);
       } else {
-        // 🚨 SI LA BD LO RECHAZA, MOSTRAMOS UN ERROR GENERAL
         sm.showSnackBar(
           const SnackBar(
-            content: Text(
-              'Código no reconocido: No es un producto ni un cliente VIP válido.',
-            ),
+            content: Text('Tarjeta VIP no reconocida o inválida.'),
             backgroundColor: Colors.red,
             duration: Duration(seconds: 4),
           ),
         );
+        onContinuar();
       }
     } catch (e) {
       if (!mounted) {
@@ -128,28 +236,28 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
       nav.pop();
       sm.showSnackBar(
         const SnackBar(
-          content: Text('Error al conectar con la base de datos.'),
+          content: Text('Error al conectar con la BD.'),
           backgroundColor: Colors.red,
         ),
       );
-      debugPrint('Error procesando QR VIP: $e');
-    }
-    if (mounted) {
-      _buscadorFocus.requestFocus();
+      onContinuar();
     }
   }
 
-  void _mostrarOpcionesVIP(Map<String, dynamic> cliente, String qrHash) {
+  void _mostrarOpcionesVIP(
+    Map<String, dynamic> cliente,
+    String qrHash,
+    VoidCallback onContinuar,
+  ) {
     if (!mounted) {
       return;
     }
-
-    bool tieneRopaLinea = carrito.any((item) => item['en_rebaja'] == false);
     double saldoDisponible =
         double.tryParse(cliente['saldo_cashback'].toString()) ?? 0.0;
 
     showDialog(
       context: context,
+      barrierDismissible: false,
       builder: (BuildContext dialogCtx) => AlertDialog(
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
@@ -159,7 +267,10 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
           children: [
             Icon(Icons.stars, color: Colors.amber, size: 30),
             SizedBox(width: 10),
-            Text('CLIENTE VIP', style: TextStyle(fontWeight: FontWeight.bold)),
+            Text(
+              'TARJETA DETECTADA',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
           ],
         ),
         content: Column(
@@ -202,20 +313,10 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
               ),
             ),
             const SizedBox(height: 20),
-            if (!tieneRopaLinea && saldoDisponible > 0)
-              const Text(
-                '⚠️ Para gastar saldo, debe llevar al menos un producto de línea.',
-                style: TextStyle(
-                  color: Colors.orange,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                ),
-              )
-            else
-              const Text(
-                '¿Qué desea hacer el cliente con esta compra?',
-                style: TextStyle(color: Colors.grey),
-              ),
+            const Text(
+              '¿Qué desea hacer el cliente con esta compra?',
+              style: TextStyle(color: Colors.grey),
+            ),
           ],
         ),
         actionsAlignment: MainAxisAlignment.center,
@@ -227,7 +328,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
             ),
             icon: const Icon(Icons.add_circle_outline),
             label: const Text(
-              'ACUMULAR',
+              'ACUMULAR CASHBACK',
               style: TextStyle(fontWeight: FontWeight.bold),
             ),
             onPressed: () {
@@ -239,6 +340,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                 _recalcularTotal();
               });
               Navigator.pop(dialogCtx);
+              onContinuar();
             },
           ),
           const SizedBox(width: 10),
@@ -250,10 +352,10 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
             ),
             icon: const Icon(Icons.monetization_on),
             label: const Text(
-              'GASTAR',
+              'GASTAR SALDO',
               style: TextStyle(fontWeight: FontWeight.bold),
             ),
-            onPressed: (!tieneRopaLinea || saldoDisponible <= 0)
+            onPressed: (saldoDisponible <= 0)
                 ? null
                 : () {
                     setState(() {
@@ -264,15 +366,12 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                       _recalcularTotal();
                     });
                     Navigator.pop(dialogCtx);
+                    onContinuar();
                   },
           ),
         ],
       ),
-    ).then((_) {
-      if (mounted) {
-        _buscadorFocus.requestFocus();
-      }
-    });
+    );
   }
 
   void _mostrarAlertaTraspaso(String qrViejo, String nuevoNivel) {
@@ -304,9 +403,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
           ],
         ),
         content: Text(
-          'Este cliente acaba de alcanzar las compras necesarias.\n\n'
-          'Es necesario actualizar su tarjeta física al Nivel ${nuevoNivel.toUpperCase()}.\n\n'
-          'Presiona OK para abrir el escáner de traspasos.',
+          'Este cliente acaba de alcanzar las compras necesarias.\n\nEs necesario actualizar su tarjeta física al Nivel ${nuevoNivel.toUpperCase()}.\n\nPresiona OK para abrir el escáner de traspasos.',
           style: const TextStyle(fontSize: 15),
         ),
         actionsAlignment: MainAxisAlignment.center,
@@ -426,7 +523,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
       'cantidad': piezasTotalesVenta,
       'metodo': metodo,
     });
-
     await prefs.setString('caja_ventas_detalles', jsonEncode(detalles));
   }
 
@@ -454,7 +550,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         );
         _buscadorFocus.requestFocus();
       }
-      debugPrint('Error cámara: $e');
     }
   }
 
@@ -465,7 +560,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     if (!mounted) {
       return;
     }
-
     showDialog(
       context: context,
       builder: (BuildContext contextDialog) {
@@ -504,7 +598,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     });
   }
 
-  // 🚨 DETECCIÓN UNIVERSAL BLINDADA (El código que lo arregla todo)
   void _agregarAlCarrito(String codigoOBusqueda) {
     if (codigoOBusqueda.isEmpty) {
       if (mounted) {
@@ -514,15 +607,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     }
 
     String codigoLimpio = codigoOBusqueda.trim();
-
-    // 🚨 LIMPIADOR UNIVERSAL DE CÓDIGOS QR DIGITALES
-    // Si el QR de la tarjeta VIP es un enlace web (ej: https://api.jpjeans.com/vip/abcd123)
-    // Extraemos de forma inteligente solo el último fragmento para que la BD lo entienda.
-    if (codigoLimpio.startsWith('http')) {
-      codigoLimpio = codigoLimpio.split('/').last;
-    }
-
-    // === 1. LÓGICA DE BÚSQUEDA DE PRODUCTOS PRIMERO ===
     final datosEscaneo = decodificarEscaneo(codigoLimpio);
     String skuLimpio = datosEscaneo['sku']!;
     String tallaLimpia = datosEscaneo['talla']!;
@@ -534,7 +618,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     }).toList();
 
     if (producto.isNotEmpty) {
-      // 🟢 ES UN PRODUCTO FÍSICO
       var p = producto.first;
       List<Map<String, dynamic>> tallasBD = parsearTallasBD(p['tallas']);
       if (tallaLimpia == 'UNICA' &&
@@ -545,8 +628,17 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
       }
       _ejecutarAgregarAlCarrito(p, tallaLimpia, tallasBD);
     } else {
-      // 🟡 NO ES ROPA: LO MANDAMOS DIRECTO AL SERVIDOR PARA QUE VERIFIQUE SI ES TARJETA VIP
-      _procesarQRVip(codigoLimpio);
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Prenda no encontrada en inventario.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      _buscadorController.clear();
+      _buscadorFocus.requestFocus();
     }
   }
 
@@ -566,7 +658,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         break;
       }
     }
-
     if (stockDisponible == 0 && tallasBD.isEmpty) {
       stockDisponible = int.tryParse(p["stock_bodega"]?.toString() ?? '0') ?? 0;
     }
@@ -589,9 +680,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         ),
       );
       _buscadorController.clear();
-      if (mounted) {
-        _buscadorFocus.requestFocus();
-      }
+      _buscadorFocus.requestFocus();
       return;
     }
 
@@ -620,21 +709,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
           "foto_url": sanearImagen(p["url_foto_principal"]),
         });
       }
-
-      if (_usarSaldoVIP && carrito.every((item) => item['en_rebaja'] == true)) {
-        _usarSaldoVIP = false;
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'El saldo VIP solo se puede gastar si hay productos de línea.',
-              ),
-              backgroundColor: Colors.orange,
-            ),
-          );
-        }
-      }
-
       _recalcularTotal();
       _buscadorController.clear();
       _guardarCarritoMemoria();
@@ -703,14 +777,10 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         _cobroEfectivoModo = false;
         _cobroMixtoModo = false;
         _descuentoPorPieza = 0.0;
-      }
-
-      if (_usarSaldoVIP &&
-          carrito.isNotEmpty &&
-          carrito.every((item) => item['en_rebaja'] == true)) {
+        _clienteVIP = null;
         _usarSaldoVIP = false;
+        _saldoVipAGastar = 0.0;
       }
-
       _recalcularTotal();
       _guardarCarritoMemoria();
     });
@@ -720,13 +790,9 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
   }
 
   Future<void> _aplicarCupon() async {
-    if (!mounted) {
+    if (!mounted || carrito.isEmpty) {
       return;
     }
-    if (carrito.isEmpty) {
-      return;
-    }
-
     String codigoIngresado = _cuponController.text.trim().toUpperCase();
     final sm = ScaffoldMessenger.of(context);
 
@@ -755,9 +821,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
       if (!mounted) {
         return;
       }
-
       var data = jsonDecode(res.body);
-
       if (data['valido'] == true) {
         setState(() {
           _vendedorAsociado = codigoIngresado;
@@ -794,7 +858,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
           backgroundColor: Colors.orange,
         ),
       );
-      debugPrint('Error cupón: $e');
     } finally {
       if (mounted) {
         _buscadorFocus.requestFocus();
@@ -812,9 +875,9 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
       0,
       (sum, item) => sum + (item["precio"] * item["cantidad"]),
     );
-
     _total = _subtotal - _descuentoAplicado;
 
+    // 🚨 EL SALDO VIP AHORA SE RESTA AL TOTAL FINAL
     if (_clienteVIP != null && _usarSaldoVIP) {
       if (_saldoVipAGastar > _total) {
         _saldoVipAGastar = _total;
@@ -845,13 +908,9 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
   }
 
   Future<void> _iniciarCobroTerminalMP() async {
-    if (!mounted) {
+    if (!mounted || carrito.isEmpty || _procesandoCobro) {
       return;
     }
-    if (carrito.isEmpty || _procesandoCobro) {
-      return;
-    }
-
     setState(() => _procesandoCobro = true);
 
     final nav = Navigator.of(context, rootNavigator: true);
@@ -892,7 +951,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         headers: {"Content-Type": "application/json"},
         body: jsonEncode({"total": _total}),
       );
-
       if (!mounted) {
         return;
       }
@@ -900,7 +958,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
 
       if (data['exito'] == true && data['intent_id'] != null) {
         String intentId = data['intent_id'];
-
         _mpPollingTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
           Future<void> verificarEstado() async {
             try {
@@ -922,7 +979,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                 if (estado == 'FINISHED') {
                   timer.cancel();
                   nav.pop();
-
                   if (estadoPago == 'approved') {
                     _ejecutarCobroEImprimirTicket(
                       metodo: "Tarjeta MP",
@@ -971,7 +1027,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                   backgroundColor: Colors.red,
                 ),
               );
-              debugPrint('Error status MP: $e');
               if (mounted) {
                 _buscadorFocus.requestFocus();
               }
@@ -1005,16 +1060,12 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
           backgroundColor: Colors.red,
         ),
       );
-      debugPrint('Error init MP: $e');
       if (mounted) {
         _buscadorFocus.requestFocus();
       }
     }
   }
 
-  // =========================================================================
-  // 🖨️ DELEGAMOS LA IMPRESIÓN AL MOTOR EXTERNO
-  // =========================================================================
   Future<void> _ejecutarCobroEImprimirTicket({
     required String metodo,
     String? mpIntentId,
@@ -1094,7 +1145,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         "metodo_pago": metodoDB,
         "codigo_creador": _vendedorAsociado,
       };
-
       if (mpIntentId != null) {
         bodyData["mp_intent_id"] = mpIntentId;
       }
@@ -1108,7 +1158,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         headers: {"Content-Type": "application/json"},
         body: jsonEncode(bodyData),
       );
-
       if (!mounted) {
         return;
       }
@@ -1124,6 +1173,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
             ? "Pago con Saldo VIP: -\$${_saldoVipAGastar.toStringAsFixed(2)}"
             : "";
 
+        final Map<String, dynamic>? vipInfo = data['vip_info'];
         final String? alertaTraspaso = data['alerta_traspaso'];
         final String? qrViejo = _clienteVIP != null
             ? _clienteVIP!['qr_hash']
@@ -1162,7 +1212,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         _guardarCarritoMemoria();
         _cargarCatalogoDesdeCerebro();
 
-        // 🚨 LLAMADA AL MOTOR DE IMPRESIÓN EXTERNO
         await MotorImpresion.imprimirTicketVenta(
           carritoAEnviar: carritoAEnviar,
           metodoDB: metodoDB,
@@ -1172,6 +1221,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
           cambioImpresion: cambioImpresion,
           descuentoTxt: descuentoTxt,
           vipTxt: vipTxt,
+          vipInfo: vipInfo,
         );
 
         if (alertaTraspaso != null && qrViejo != null && mounted) {
@@ -1196,14 +1246,11 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
           backgroundColor: Colors.red,
         ),
       );
-      debugPrint('Error de cobro final: $e');
     } finally {
       if (mounted) {
         setState(() {
           _procesandoCobro = false;
         });
-      }
-      if (mounted) {
         _buscadorFocus.requestFocus();
       }
     }
@@ -1233,10 +1280,9 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
       } else if (met.contains('TRANSF')) {
         calcTransferencia += monto;
       } else if (met.contains('MIXTO')) {
-        RegExp reg = RegExp(
+        var match = RegExp(
           r'Efectivo:\s*\$([\d\.]+),\s*Transf:\s*\$([\d\.]+)',
-        );
-        var match = reg.firstMatch(d['metodo'].toString());
+        ).firstMatch(d['metodo'].toString());
         if (match != null) {
           calcEfectivo += double.tryParse(match.group(1) ?? '0') ?? 0;
           calcTransferencia += double.tryParse(match.group(2) ?? '0') ?? 0;
@@ -1253,7 +1299,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     for (var a in apartados) {
       double monto = (a['monto'] as num).toDouble();
       String met = a['metodo'].toString().toUpperCase();
-
       if (met.contains('TARJETA') || met == 'TARJETA MP') {
         calcTarjeta += monto;
       } else if (met.contains('TRANSF')) {
@@ -1263,22 +1308,15 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
       }
     }
 
-    final String? cambiosStr = prefs.getString('caja_cambios_detalles');
-    List<dynamic> cambios = cambiosStr != null ? jsonDecode(cambiosStr) : [];
-
-    final String? gastosStr = prefs.getString('caja_lista_gastos');
-    List<dynamic> gastosLista = gastosStr != null ? jsonDecode(gastosStr) : [];
+    List<dynamic> cambios = prefs.getString('caja_cambios_detalles') != null
+        ? jsonDecode(prefs.getString('caja_cambios_detalles')!)
+        : [];
+    List<dynamic> gastosLista = prefs.getString('caja_lista_gastos') != null
+        ? jsonDecode(prefs.getString('caja_lista_gastos')!)
+        : [];
 
     double calcVentasTotales = calcEfectivo + calcTarjeta + calcTransferencia;
     double totalFisicoCaja = calcEfectivo - widget.gastosTotales;
-
-    Map<String, dynamic> detallesCorte = {
-      "piezas": totalPiezas,
-      "items": detalles,
-      "apartados": apartados,
-      "cambios": cambios,
-      "gastos": gastosLista,
-    };
 
     try {
       await ApiService.guardarCorteCaja(
@@ -1287,7 +1325,13 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
         calcTarjeta,
         calcTransferencia,
         widget.gastosTotales,
-        detalles: detallesCorte,
+        detalles: {
+          "piezas": totalPiezas,
+          "items": detalles,
+          "apartados": apartados,
+          "cambios": cambios,
+          "gastos": gastosLista,
+        },
       );
     } catch (e) {
       if (!mounted) {
@@ -1302,15 +1346,12 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
           duration: Duration(seconds: 6),
         ),
       );
-      debugPrint('Error corte red: $e');
       return;
     }
 
     if (!mounted) {
       return;
     }
-
-    // 🚨 LLAMADA AL MOTOR DE IMPRESIÓN EXTERNO
     await MotorImpresion.imprimirCorteCaja(
       totalPiezas: totalPiezas,
       detalles: detalles,
@@ -1333,10 +1374,6 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
     await prefs.remove('caja_apartados_detalles');
     await prefs.remove('caja_cambios_detalles');
     await prefs.remove('caja_lista_gastos');
-
-    if (!mounted) {
-      return;
-    }
     sm.showSnackBar(
       const SnackBar(
         content: Text('✅ Corte exitoso. Memoria de caja limpiada.'),
@@ -1391,7 +1428,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
           focusNode: _buscadorFocus,
           autofocus: true,
           decoration: InputDecoration(
-            labelText: 'Escanear Producto o Tarjeta VIP',
+            labelText: 'Escanear Producto',
             border: const OutlineInputBorder(),
             filled: true,
             fillColor: const Color(0xFFF9F9F9),
@@ -1430,7 +1467,7 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                     ),
                   ),
                   Text(
-                    'Listo para escanear',
+                    'Listo para escanear ropa',
                     style: TextStyle(color: Colors.green, fontSize: 8),
                   ),
                 ],
@@ -1802,11 +1839,11 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                               fontSize: 11,
                             ),
                           ),
-                          onPressed: () {
+                          onPressed: () => _preguntarVIPAntesDeCobrar(() {
                             setState(() {
                               _cobroEfectivoModo = true;
                             });
-                          },
+                          }),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -1825,7 +1862,9 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                               fontSize: 11,
                             ),
                           ),
-                          onPressed: _iniciarCobroTerminalMP,
+                          onPressed: () => _preguntarVIPAntesDeCobrar(() {
+                            _iniciarCobroTerminalMP();
+                          }),
                         ),
                       ),
                     ],
@@ -1848,9 +1887,11 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                               fontSize: 11,
                             ),
                           ),
-                          onPressed: () => _ejecutarCobroEImprimirTicket(
-                            metodo: "Transferencia",
-                          ),
+                          onPressed: () => _preguntarVIPAntesDeCobrar(() {
+                            _ejecutarCobroEImprimirTicket(
+                              metodo: "Transferencia",
+                            );
+                          }),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -1869,11 +1910,11 @@ class _TerminalCobroViewState extends State<TerminalCobroView> {
                               fontSize: 11,
                             ),
                           ),
-                          onPressed: () {
+                          onPressed: () => _preguntarVIPAntesDeCobrar(() {
                             setState(() {
                               _cobroMixtoModo = true;
                             });
-                          },
+                          }),
                         ),
                       ),
                     ],

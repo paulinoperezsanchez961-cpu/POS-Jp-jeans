@@ -27,28 +27,22 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	
-	<!-- ==================================================================== -->
-	<!-- 🚨 PERMISOS DE HARDWARE PARA APPLE APP STORE (DOCUMENTACIÓN) 🚨      -->
-	<!-- ==================================================================== -->
-	
-	<!-- 1. PERMISO DE BIOMETRÍA (FACE ID / TOUCH ID) -->
-	<!-- Requerido por el paquete local_auth para el inicio de sesión del cajero -->
 	<key>NSFaceIDUsageDescription</key>
 	<string>JP Jeans necesita usar Face ID o Touch ID para garantizar un acceso rápido y seguro de los empleados a la terminal de cobro.</string>
 
-	<!-- 2. PERMISO DE CÁMARA -->
-	<!-- Requerido por el paquete barcode_scan2 para leer los códigos de los pantalones -->
 	<key>NSCameraUsageDescription</key>
-	<string>JP Jeans requiere acceso a la cámara para escanear los códigos de barras y QR de los productos, agilizando las ventas en el mostrador.</string>
+	<string>JP Jeans necesita acceso a la cámara para escanear los códigos de barras de los productos y las tarjetas VIP de los clientes en el punto de venta.</string>
 
-	<!-- 3. PERMISO DE BLUETOOTH (PREPARACIÓN PARA ESC/POS) -->
-	<!-- Requerido para la futura integración de la impresora térmica de tickets -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>JP Jeans necesita acceso a la galería para subir fotografías de las prendas al inventario y a la tienda en línea.</string>
+
+	<key>NSMicrophoneUsageDescription</key>
+	<string>JP Jeans necesita acceso al micrófono para grabar videos o notas de voz relacionadas con los productos en el panel de administración.</string>
+
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>JP Jeans utiliza Bluetooth para conectarse a la impresora térmica local y emitir los comprobantes de venta físicos a los clientes.</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>
 	<string>JP Jeans necesita conectarse a periféricos Bluetooth (como impresoras térmicas) para la operación diaria de la caja.</string>
-
-	<!-- ==================================================================== -->
 
 	<key>UIApplicationSceneManifest</key>
 	<dict>

@@ -27,6 +27,7 @@ class MotorImpresion {
     required double cambioImpresion,
     required String descuentoTxt,
     required String vipTxt,
+    Map<String, dynamic>? vipInfo,
   }) async {
     final doc = pw.Document();
     pw.MemoryImage? imageLogo;
@@ -48,32 +49,45 @@ class MotorImpresion {
         pageFormat: const PdfPageFormat(
           80 * PdfPageFormat.mm,
           double.infinity,
-          marginAll:
-              5 *
-              PdfPageFormat.mm, // 🚨 MARGEN AMPLIADO (Evita cortes a los lados)
+          marginLeft: 8 * PdfPageFormat.mm,
+          marginRight: 8 * PdfPageFormat.mm,
+          marginTop: 5 * PdfPageFormat.mm,
+          marginBottom: 5 * PdfPageFormat.mm,
         ),
         build: (pw.Context pdfCtx) {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.center,
             mainAxisSize: pw.MainAxisSize.min,
             children: [
-              // 🚨 LOGO MÁS GRANDE COMO PROTAGONISTA
-              if (imageLogo != null) pw.Image(imageLogo, width: 75, height: 75),
-              pw.SizedBox(height: 8),
+              if (imageLogo != null) pw.Image(imageLogo, width: 95, height: 95),
+              pw.SizedBox(height: 6),
 
-              // 🚨 TEXTOS MÁS PEQUEÑOS Y ESTILIZADOS
               pw.Text(
                 'JP JEANS',
                 style: pw.TextStyle(
-                  fontSize: 12,
+                  fontSize: 10,
                   fontWeight: pw.FontWeight.bold,
                 ),
               ),
-              pw.Text('TLAXCALA', style: pw.TextStyle(fontSize: 8)),
+              pw.Text('TLAXCALA', style: pw.TextStyle(fontSize: 7)),
               pw.SizedBox(height: 2),
               pw.Text(
                 'Central de autobuses, Tlax',
                 style: pw.TextStyle(fontSize: 7),
+              ),
+              pw.Text(
+                'www.jpjeansvip.com',
+                style: pw.TextStyle(
+                  fontSize: 7,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+              pw.Text(
+                'IG: @jpvipjeans',
+                style: pw.TextStyle(
+                  fontSize: 7,
+                  fontWeight: pw.FontWeight.bold,
+                ),
               ),
 
               pw.SizedBox(height: 6),
@@ -90,7 +104,6 @@ class MotorImpresion {
               pw.Divider(borderStyle: pw.BorderStyle.dashed),
               pw.SizedBox(height: 4),
 
-              // RESUMEN DE COMPRA
               ...carritoAEnviar.map((item) {
                 return pw.Padding(
                   padding: const pw.EdgeInsets.only(bottom: 4),
@@ -241,7 +254,48 @@ class MotorImpresion {
 
               pw.SizedBox(height: 10),
               pw.Divider(borderStyle: pw.BorderStyle.dashed),
-              pw.SizedBox(height: 10),
+
+              // 👑 🚨 IMPRESIÓN DEL DETALLE VIP EN EL TICKET (Corregido el símbolo $)
+              if (vipInfo != null) ...[
+                pw.SizedBox(height: 5),
+                pw.Text(
+                  '--- CLUB VIP JP JEANS ---',
+                  style: pw.TextStyle(
+                    fontSize: 8,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+                pw.SizedBox(height: 3),
+                pw.Text(
+                  'Socio: ${vipInfo["nombre"]}',
+                  style: pw.TextStyle(fontSize: 8),
+                ),
+
+                if ((double.tryParse(vipInfo["gastado"].toString()) ?? 0) > 0)
+                  pw.Text(
+                    'CashBack Canjeado: -\$${(double.tryParse(vipInfo["gastado"].toString()) ?? 0).toStringAsFixed(2)}',
+                    style: pw.TextStyle(fontSize: 8),
+                  ),
+
+                if ((double.tryParse(vipInfo["ganado"].toString()) ?? 0) > 0)
+                  pw.Text(
+                    'CashBack Ganado: +\$${(double.tryParse(vipInfo["ganado"].toString()) ?? 0).toStringAsFixed(2)}',
+                    style: pw.TextStyle(fontSize: 8),
+                  ),
+
+                pw.SizedBox(height: 2),
+                pw.Text(
+                  'Saldo Total Disp.: \$${(double.tryParse(vipInfo["saldo_total"].toString()) ?? 0).toStringAsFixed(2)}',
+                  style: pw.TextStyle(
+                    fontSize: 8,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+                pw.SizedBox(height: 5),
+                pw.Divider(borderStyle: pw.BorderStyle.dashed),
+              ],
+
+              pw.SizedBox(height: 5),
 
               pw.Text(
                 '¡GRACIAS POR SU COMPRA!',
@@ -257,16 +311,13 @@ class MotorImpresion {
                 'Muchas gracias por consumir producto nacional, así apoyas a la economía local y al crecimiento del estado. Nuestra meta como empresa es poder proporcionar productos de la más alta calidad a un precio justo y llevar la moda al estado del cual nacimos. Somos una empresa 100% Tlaxcalteca y es un honor estar presentes ya en el estado. Gracias por confiar en nosotros, un saludo de parte de Paulino Pérez y bonito día.',
                 textAlign: pw.TextAlign.center,
                 style: pw.TextStyle(
-                  fontSize:
-                      6, // 🚨 Letra más pequeña para que encaje como bloque
+                  fontSize: 6,
                   color: PdfColors.black,
                   lineSpacing: 1.5,
                 ),
               ),
 
-              pw.SizedBox(
-                height: 15 * PdfPageFormat.mm,
-              ), // Salto para la guillotina automática
+              pw.SizedBox(height: 15 * PdfPageFormat.mm),
             ],
           );
         },
@@ -333,23 +384,26 @@ class MotorImpresion {
         pageFormat: const PdfPageFormat(
           80 * PdfPageFormat.mm,
           double.infinity,
-          marginAll: 5 * PdfPageFormat.mm, // 🚨 MARGEN AMPLIADO
+          marginLeft: 8 * PdfPageFormat.mm,
+          marginRight: 8 * PdfPageFormat.mm,
+          marginTop: 5 * PdfPageFormat.mm,
+          marginBottom: 5 * PdfPageFormat.mm,
         ),
         build: (pw.Context pdfCtx) {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.center,
             mainAxisSize: pw.MainAxisSize.min,
             children: [
-              if (imageLogo != null) pw.Image(imageLogo, width: 55, height: 55),
+              if (imageLogo != null) pw.Image(imageLogo, width: 85, height: 85),
               pw.SizedBox(height: 5),
               pw.Text(
                 'CORTE DE CAJA',
                 style: pw.TextStyle(
-                  fontSize: 12,
+                  fontSize: 10,
                   fontWeight: pw.FontWeight.bold,
                 ),
               ),
-              pw.Text('JP JEANS TLAXCALA', style: pw.TextStyle(fontSize: 8)),
+              pw.Text('JP JEANS TLAXCALA', style: pw.TextStyle(fontSize: 7)),
               pw.SizedBox(height: 5),
               pw.Text(fechaHora, style: pw.TextStyle(fontSize: 8)),
               pw.Divider(),
